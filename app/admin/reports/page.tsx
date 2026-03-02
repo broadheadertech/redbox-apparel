@@ -5,7 +5,7 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import Link from "next/link";
-import { FileText } from "lucide-react";
+import { FileText, TrendingUp, ShoppingCart, Receipt, Trophy } from "lucide-react";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
 
@@ -113,6 +113,12 @@ export default function HqReportsPage() {
       )
     : brandData;
 
+  // ── Summary card computations (derived from salesData, no extra query) ────
+  const totalRevenueCentavos = salesData?.reduce((s, r) => s + r.revenueCentavos, 0) ?? 0;
+  const totalTxnCount = salesData?.reduce((s, r) => s + r.txnCount, 0) ?? 0;
+  const avgTxnValueCentavos = totalTxnCount > 0 ? Math.round(totalRevenueCentavos / totalTxnCount) : 0;
+  const topBranch = salesData?.[0]; // already sorted by revenue desc
+
   const salesPagination = usePagination(salesData);
   const brandPagination = usePagination(filteredBrandData);
   const invoicePagination = usePagination(invoiceData?.byBranch);
@@ -205,6 +211,73 @@ export default function HqReportsPage() {
               ))}
             </select>
           </div>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {/* Total Sales Revenue */}
+        <div className="rounded-lg border bg-card p-4 space-y-2">
+          <div className="flex items-center justify-between text-muted-foreground">
+            <p className="text-sm font-medium">Sales Revenue</p>
+            <TrendingUp className="h-4 w-4" />
+          </div>
+          {salesData === undefined ? (
+            <div className="h-8 w-32 animate-pulse rounded bg-muted" />
+          ) : (
+            <p className="text-2xl font-bold tabular-nums">{formatCentavos(totalRevenueCentavos)}</p>
+          )}
+          <p className="text-xs text-muted-foreground">Gross revenue for selected period</p>
+        </div>
+
+        {/* Total Transactions */}
+        <div className="rounded-lg border bg-card p-4 space-y-2">
+          <div className="flex items-center justify-between text-muted-foreground">
+            <p className="text-sm font-medium">Total Transactions</p>
+            <ShoppingCart className="h-4 w-4" />
+          </div>
+          {salesData === undefined ? (
+            <div className="h-8 w-20 animate-pulse rounded bg-muted" />
+          ) : (
+            <p className="text-2xl font-bold tabular-nums">{totalTxnCount.toLocaleString()}</p>
+          )}
+          <p className="text-xs text-muted-foreground">Sales processed across all branches</p>
+        </div>
+
+        {/* Avg Transaction Value */}
+        <div className="rounded-lg border bg-card p-4 space-y-2">
+          <div className="flex items-center justify-between text-muted-foreground">
+            <p className="text-sm font-medium">Avg Transaction Value</p>
+            <Receipt className="h-4 w-4" />
+          </div>
+          {salesData === undefined ? (
+            <div className="h-8 w-24 animate-pulse rounded bg-muted" />
+          ) : (
+            <p className="text-2xl font-bold tabular-nums">
+              {totalTxnCount > 0 ? formatCentavos(avgTxnValueCentavos) : "—"}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">Revenue ÷ transactions</p>
+        </div>
+
+        {/* Best Performing Branch */}
+        <div className="rounded-lg border bg-card p-4 space-y-2">
+          <div className="flex items-center justify-between text-muted-foreground">
+            <p className="text-sm font-medium">Best Branch</p>
+            <Trophy className="h-4 w-4" />
+          </div>
+          {salesData === undefined ? (
+            <div className="h-8 w-28 animate-pulse rounded bg-muted" />
+          ) : topBranch ? (
+            <>
+              <p className="text-xl font-bold leading-tight truncate">{topBranch.branchName}</p>
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {formatCentavos(topBranch.revenueCentavos)} &middot; {topBranch.txnCount.toLocaleString()} txns
+              </p>
+            </>
+          ) : (
+            <p className="text-2xl font-bold">—</p>
+          )}
         </div>
       </div>
 
