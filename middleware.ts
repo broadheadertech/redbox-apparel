@@ -1,44 +1,113 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
-import { PUBLIC_ROUTES, ROLE_ROUTE_ACCESS, ROLE_DEFAULT_ROUTES } from "@/lib/routes";
+import { NextRequest, NextResponse } from "next/server";
 
-// Public routes — no auth required
-const isPublicRoute = createRouteMatcher(PUBLIC_ROUTES);
+// ---------------------------------------------------------------------------
+// Route constants (inlined — path aliases can't be bundled for Edge runtime)
+// ---------------------------------------------------------------------------
 
-export default clerkMiddleware(async (auth, req) => {
+const PUBLIC_PREFIXES = [
+  "/sign-in",
+  "/sign-up",
+  "/api/webhooks",
+  "/browse",
+  "/products",
+  "/branches",
+  "/reserve",
+];
+
+const ROLE_ROUTE_ACCESS: Record<string, readonly string[]> = {
+  "/admin": ["admin"],
+  "/pos": ["admin", "manager", "cashier"],
+  "/branch": ["admin", "manager", "viewer"],
+  "/warehouse": ["admin", "hqStaff", "warehouseStaff"],
+  "/driver": ["admin", "driver"],
+  "/supplier": ["admin", "supplier"],
+};
+
+const ROLE_DEFAULT_ROUTES: Record<string, string> = {
+  admin: "/admin/users",
+  hqStaff: "/warehouse",
+  manager: "/branch/dashboard",
+  cashier: "/pos",
+  warehouseStaff: "/warehouse/transfers",
+  viewer: "/branch/dashboard",
+  driver: "/driver/deliveries",
+  supplier: "/supplier/portal",
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function isPublicPath(pathname: string): boolean {
+  if (pathname === "/") return true;
+  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+interface ClerkJwtPayload {
+  exp?: number;
+  metadata?: { role?: string };
+}
+
+/** Decode the JWT payload without verifying the signature (routing only). */
+function decodeClerkSession(token: string): ClerkJwtPayload | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    // Base64url → Base64 → JSON
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(base64)) as ClerkJwtPayload;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Middleware
+//
+// Security model:
+//   - Middleware: lightweight routing/redirect only (no crypto verification).
+//   - Convex backend: full JWT verification via requireRole() / withBranchScope().
+//   - Clerk's clerkMiddleware is intentionally avoided: @clerk/shared v3.x has
+//     no edge-light exports for #crypto / #safe-node-apis, causing Vercel Edge
+//     bundler failures.
+// ---------------------------------------------------------------------------
+
+export default function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
-  // Allow public routes without authentication
-  if (isPublicRoute(req)) {
-    return;
+  // Public paths — no auth required
+  if (isPublicPath(pathname)) return;
+
+  // Read Clerk session JWT from cookie
+  const sessionToken = req.cookies.get("__session")?.value;
+  if (!sessionToken) {
+    const signInUrl = new URL("/sign-in", req.url);
+    signInUrl.searchParams.set("redirect_url", pathname);
+    return NextResponse.redirect(signInUrl);
   }
 
-  // Check auth state
-  const authState = await auth();
+  const payload = decodeClerkSession(sessionToken);
 
-  // Redirect to sign-in if unauthenticated
-  if (!authState.userId) {
-    return (await auth.protect()) as unknown as NextResponse;
+  // Malformed or expired token → force re-login
+  if (!payload || (payload.exp !== undefined && payload.exp < Date.now() / 1000)) {
+    const signInUrl = new URL("/sign-in", req.url);
+    signInUrl.searchParams.set("redirect_url", pathname);
+    return NextResponse.redirect(signInUrl);
   }
 
-  // Extract role from session claims
-  const sessionClaims = authState.sessionClaims as Record<string, unknown>;
-  const metadata = sessionClaims?.metadata as Record<string, unknown> | undefined;
-  const role = metadata?.role as string | undefined;
+  const role = payload.metadata?.role;
 
-  // Check role-based route access
+  // Role-based route access check
   for (const [prefix, allowedRoles] of Object.entries(ROLE_ROUTE_ACCESS)) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) {
       if (!role || !allowedRoles.includes(role)) {
-        const defaultRoute = role
-          ? ROLE_DEFAULT_ROUTES[role as keyof typeof ROLE_DEFAULT_ROUTES] ?? "/"
-          : "/";
+        const defaultRoute = role ? (ROLE_DEFAULT_ROUTES[role] ?? "/") : "/";
         return NextResponse.redirect(new URL(defaultRoute, req.url));
       }
       break;
     }
   }
-});
+}
 
 export const config = {
   matcher: [
