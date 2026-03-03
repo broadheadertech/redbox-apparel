@@ -34,6 +34,7 @@ import type * as dashboards_birReports from "../dashboards/birReports.js";
 import type * as dashboards_branchAnalytics from "../dashboards/branchAnalytics.js";
 import type * as dashboards_branchDashboard from "../dashboards/branchDashboard.js";
 import type * as dashboards_demandIntelligence from "../dashboards/demandIntelligence.js";
+import type * as dashboards_hqAnalytics from "../dashboards/hqAnalytics.js";
 import type * as dashboards_hqDashboard from "../dashboards/hqDashboard.js";
 import type * as demand_entries from "../demand/entries.js";
 import type * as demand_summaries from "../demand/summaries.js";
@@ -91,6 +92,7 @@ declare const fullApi: ApiFromModules<{
   "dashboards/branchAnalytics": typeof dashboards_branchAnalytics;
   "dashboards/branchDashboard": typeof dashboards_branchDashboard;
   "dashboards/demandIntelligence": typeof dashboards_demandIntelligence;
+  "dashboards/hqAnalytics": typeof dashboards_hqAnalytics;
   "dashboards/hqDashboard": typeof dashboards_hqDashboard;
   "demand/entries": typeof demand_entries;
   "demand/summaries": typeof demand_summaries;
