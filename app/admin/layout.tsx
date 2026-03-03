@@ -19,6 +19,7 @@ import {
   ClipboardList,
   FileText,
   Settings,
+  Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -48,6 +49,7 @@ const managementNavItems: NavItem[] = [
   { href: "/admin/reports", label: "Reports", icon: BarChart3, roles: ["admin"] },
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
   { href: "/admin/invoices", label: "Invoices", icon: FileText, roles: ["admin"] },
+  { href: "/admin/promotions", label: "Promotions", icon: Tag, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
 ];
 

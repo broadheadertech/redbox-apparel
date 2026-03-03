@@ -277,3 +277,70 @@ export const getVariantByBarcode = query({
     };
   },
 });
+
+// ─── getVariantByCode ────────────────────────────────────────────────────────
+// Lookup a variant by scanning input — tries barcode first, then SKU.
+// Used by USB barcode guns and RFID readers that output text + Enter.
+
+export const getVariantByCode = query({
+  args: { code: v.string() },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    const code = args.code.trim();
+    if (!code) return null;
+
+    // Try barcode index first (most scanners output barcodes)
+    let variant = await ctx.db
+      .query("variants")
+      .withIndex("by_barcode", (q) => q.eq("barcode", code))
+      .first();
+
+    // Fall back to SKU index
+    if (!variant) {
+      variant = await ctx.db
+        .query("variants")
+        .withIndex("by_sku", (q) => q.eq("sku", code))
+        .first();
+    }
+
+    if (!variant || !variant.isActive) return null;
+
+    const style = await ctx.db.get(variant.styleId);
+    if (!style || !style.isActive) return null;
+
+    const category = await ctx.db.get(style.categoryId);
+    if (!category || !category.isActive) return null;
+
+    const brand = await ctx.db.get(category.brandId);
+    if (!brand || !brand.isActive) return null;
+
+    const branchId = scope.branchId;
+    let stock = 0;
+    if (branchId) {
+      const inv = await ctx.db
+        .query("inventory")
+        .withIndex("by_branch_variant", (q) =>
+          q.eq("branchId", branchId).eq("variantId", variant!._id)
+        )
+        .first();
+      stock = inv?.quantity ?? 0;
+    }
+
+    return {
+      variantId: variant._id,
+      sku: variant.sku,
+      barcode: variant.barcode ?? "",
+      size: variant.size,
+      color: variant.color,
+      priceCentavos: variant.priceCentavos,
+      styleName: style.name,
+      brandName: brand.name,
+      categoryName: category.name,
+      stock,
+    };
+  },
+});

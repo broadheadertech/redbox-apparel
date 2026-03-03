@@ -39,6 +39,8 @@ function getPhilippineDateRange(dateStr: string): {
 
 /**
  * Queries today's transactions for a branch and aggregates sales by payment method.
+ * Also sums cash funds from all shifts that overlap this day.
+ * expectedCashCentavos = totalCashFund + cashSales (what should be in the drawer).
  * Shared between getDailySummary (query) and submitReconciliation (mutation).
  */
 async function _computeDailySummary(
@@ -76,13 +78,32 @@ async function _computeDailySummary(
     }
   }
 
+  // Sum cash funds from all shifts that overlap this day
+  const allShifts = await ctx.db
+    .query("cashierShifts")
+    .withIndex("by_branch_status", (q) => q.eq("branchId", branchId))
+    .collect();
+
+  let totalCashFundCentavos = 0;
+  for (const shift of allShifts) {
+    const closed = shift.closedAt ?? Date.now();
+    // Shift overlaps with this day
+    if (shift.openedAt <= endMs && closed >= startMs) {
+      totalCashFundCentavos += shift.cashFundCentavos;
+    }
+  }
+
+  // Expected cash in drawer = starting funds + cash sales
+  const expectedCashCentavos = totalCashFundCentavos + cashSalesCentavos;
+
   return {
     transactionCount,
     totalSalesCentavos,
     cashSalesCentavos,
     gcashSalesCentavos,
     mayaSalesCentavos,
-    expectedCashCentavos: cashSalesCentavos,
+    totalCashFundCentavos,
+    expectedCashCentavos,
   };
 }
 

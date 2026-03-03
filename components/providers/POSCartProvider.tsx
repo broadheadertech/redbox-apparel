@@ -32,6 +32,7 @@ type HeldTransaction = {
   items: CartItem[];
   heldAt: number;
   discountType: DiscountType;
+  selectedPromoId: string | null;
 };
 
 type CartState = {
@@ -39,6 +40,7 @@ type CartState = {
   heldTransactions: HeldTransaction[];
   activeTransactionId: string;
   discountType: DiscountType;
+  selectedPromoId: string | null;
 };
 
 type CartAction =
@@ -49,6 +51,7 @@ type CartAction =
   | { type: "HOLD_TRANSACTION" }
   | { type: "RESUME_TRANSACTION"; transactionId: string }
   | { type: "SET_DISCOUNT_TYPE"; discountType: DiscountType }
+  | { type: "SET_PROMO"; promoId: string | null }
   | { type: "RESTORE_CART"; items: CartItem[]; discountType: DiscountType };
 
 type POSCartContextValue = {
@@ -70,6 +73,8 @@ type POSCartContextValue = {
   restoreCart: (items: CartItem[], discountType: DiscountType) => void;
   discountType: DiscountType;
   setDiscountType: (type: DiscountType) => void;
+  selectedPromoId: string | null;
+  setPromoId: (promoId: string | null) => void;
   taxBreakdown: TaxBreakdown;
 };
 
@@ -123,7 +128,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       };
 
     case "CLEAR_CART":
-      return { ...state, items: [], discountType: "none" };
+      return { ...state, items: [], discountType: "none", selectedPromoId: null };
 
     case "HOLD_TRANSACTION": {
       if (state.items.length === 0) return state;
@@ -133,6 +138,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         items: [...state.items],
         heldAt: Date.now(),
         discountType: state.discountType,
+        selectedPromoId: state.selectedPromoId,
       };
       const updatedHeld = [...state.heldTransactions, held].slice(-5);
       return {
@@ -141,6 +147,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         heldTransactions: updatedHeld,
         activeTransactionId: generateTransactionId(),
         discountType: "none",
+        selectedPromoId: null,
       };
     }
 
@@ -161,12 +168,14 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           items: [...state.items],
           heldAt: Date.now(),
           discountType: state.discountType,
+          selectedPromoId: state.selectedPromoId,
         };
         return {
           items: toResume.items,
           heldTransactions: [...remainingHeld, currentHeld].slice(-5),
           activeTransactionId: toResume.id,
           discountType: toResume.discountType,
+          selectedPromoId: toResume.selectedPromoId,
         };
       }
 
@@ -175,11 +184,20 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         heldTransactions: remainingHeld,
         activeTransactionId: toResume.id,
         discountType: toResume.discountType,
+        selectedPromoId: toResume.selectedPromoId,
       };
     }
 
     case "SET_DISCOUNT_TYPE":
-      return { ...state, discountType: action.discountType };
+      // Mutual exclusion: Senior/PWD clears promo
+      return {
+        ...state,
+        discountType: action.discountType,
+        selectedPromoId: action.discountType !== "none" ? null : state.selectedPromoId,
+      };
+
+    case "SET_PROMO":
+      return { ...state, selectedPromoId: action.promoId };
 
     case "RESTORE_CART":
       return { ...state, items: action.items, discountType: action.discountType };
@@ -209,6 +227,7 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
     heldTransactions: [],
     activeTransactionId: generateTransactionId(),
     discountType: "none",
+    selectedPromoId: null,
   });
 
   // Refs for stable callback identities (avoid re-renders on every cart change)
@@ -269,6 +288,13 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const setPromoId = useCallback(
+    (promoId: string | null) => {
+      dispatch({ type: "SET_PROMO", promoId });
+    },
+    []
+  );
+
   const restoreCart = useCallback(
     (items: CartItem[], discountType: DiscountType) => {
       dispatch({ type: "RESTORE_CART", items, discountType });
@@ -296,6 +322,8 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
         restoreCart,
         discountType: state.discountType,
         setDiscountType,
+        selectedPromoId: state.selectedPromoId,
+        setPromoId,
         taxBreakdown,
       }}
     >

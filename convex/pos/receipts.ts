@@ -75,7 +75,14 @@ export const getReceiptData = query({
     // 7. Load cashier name
     const cashier = await ctx.db.get(transaction.cashierId);
 
-    // 8. Return structured receipt data
+    // 8. Load promotion name if applied
+    let promoName: string | null = null;
+    if (transaction.promotionId) {
+      const promo = await ctx.db.get(transaction.promotionId);
+      promoName = promo?.name ?? null;
+    }
+
+    // 9. Return structured receipt data
     return {
       transaction: {
         receiptNumber: transaction.receiptNumber,
@@ -83,6 +90,8 @@ export const getReceiptData = query({
         subtotalCentavos: transaction.subtotalCentavos,
         vatAmountCentavos: transaction.vatAmountCentavos,
         discountAmountCentavos: transaction.discountAmountCentavos,
+        promoDiscountAmountCentavos: transaction.promoDiscountAmountCentavos ?? 0,
+        promoName,
         totalCentavos: transaction.totalCentavos,
         paymentMethod: transaction.paymentMethod,
         discountType: transaction.discountType ?? "none",

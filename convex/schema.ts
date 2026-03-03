@@ -165,6 +165,8 @@ export default defineSchema({
     changeCentavos: v.optional(v.number()),
     isOffline: v.boolean(),
     syncedAt: v.optional(v.number()),
+    promotionId: v.optional(v.id("promotions")),
+    promoDiscountAmountCentavos: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_branch", ["branchId"])
@@ -423,6 +425,59 @@ export default defineSchema({
   })
     .index("by_branch_variant_received", ["branchId", "variantId", "receivedAt"])
     .index("by_branch_variant", ["branchId", "variantId"]),
+
+  cashierShifts: defineTable({
+    branchId: v.id("branches"),
+    cashierId: v.id("users"),
+    cashFundCentavos: v.number(),
+    status: v.union(v.literal("open"), v.literal("closed")),
+    openedAt: v.number(),
+    closedAt: v.optional(v.number()),
+    closedCashBalanceCentavos: v.optional(v.number()),
+    notes: v.optional(v.string()),
+  })
+    .index("by_branch_status", ["branchId", "status"])
+    .index("by_cashier_status", ["cashierId", "status"])
+    .index("by_branch_cashier", ["branchId", "cashierId"]),
+
+  promotions: defineTable({
+    name: v.string(),
+    description: v.optional(v.string()),
+    promoType: v.union(
+      v.literal("percentage"),
+      v.literal("fixedAmount"),
+      v.literal("buyXGetY"),
+      v.literal("tiered")
+    ),
+    // percentage
+    percentageValue: v.optional(v.number()),
+    maxDiscountCentavos: v.optional(v.number()),
+    // fixedAmount
+    fixedAmountCentavos: v.optional(v.number()),
+    // buyXGetY
+    buyQuantity: v.optional(v.number()),
+    getQuantity: v.optional(v.number()),
+    // tiered
+    minSpendCentavos: v.optional(v.number()),
+    tieredDiscountCentavos: v.optional(v.number()),
+    // scoping
+    branchIds: v.array(v.id("branches")),
+    brandIds: v.array(v.id("brands")),
+    categoryIds: v.array(v.id("categories")),
+    variantIds: v.array(v.id("variants")),
+    // date range
+    startDate: v.number(),
+    endDate: v.number(),
+    // status
+    isActive: v.boolean(),
+    priority: v.number(),
+    // audit
+    createdById: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_isActive", ["isActive"])
+    .index("by_startDate", ["startDate"]),
 
   settings: defineTable({
     key: v.string(),

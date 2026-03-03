@@ -42,6 +42,15 @@ export const DISCOUNT_TYPES = {
 export type DiscountType =
   (typeof DISCOUNT_TYPES)[keyof typeof DISCOUNT_TYPES];
 
+export const PROMO_TYPES = {
+  PERCENTAGE: "percentage",
+  FIXED_AMOUNT: "fixedAmount",
+  BUY_X_GET_Y: "buyXGetY",
+  TIERED: "tiered",
+} as const;
+
+export type PromoType = (typeof PROMO_TYPES)[keyof typeof PROMO_TYPES];
+
 export const ERROR_CODES = {
   INSUFFICIENT_STOCK: "INSUFFICIENT_STOCK",
   INVALID_DISCOUNT: "INVALID_DISCOUNT",

@@ -6,6 +6,10 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { calculateTaxBreakdown } from "../_helpers/taxCalculations";
+import {
+  calculatePromoDiscount,
+  type CartItemForPromo,
+} from "../_helpers/promoCalculations";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -48,6 +52,7 @@ export const createTransaction = mutation({
       v.literal("none")
     ),
     amountTenderedCentavos: v.optional(v.number()),
+    promotionId: v.optional(v.id("promotions")),
   },
   handler: async (ctx, args) => {
     // 1. Auth gate
@@ -143,10 +148,88 @@ export const createTransaction = mutation({
     // 6. Server-side tax calculation using AUTHORITATIVE prices (not client values)
     const taxBreakdown = calculateTaxBreakdown(validatedItems, args.discountType);
 
+    // 6b. Promo discount (only when discountType is "none" — promos don't stack with Senior/PWD)
+    let promoDiscountCentavos = 0;
+    let appliedPromotionId: Id<"promotions"> | undefined;
+
+    if (args.discountType === "none" && args.promotionId) {
+      const promo = await ctx.db.get(args.promotionId);
+      if (!promo || !promo.isActive) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "Promotion not found or inactive",
+        });
+      }
+
+      const now = Date.now();
+      if (now < promo.startDate || now > promo.endDate) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "Promotion has expired or not yet started",
+        });
+      }
+
+      if (promo.branchIds.length > 0 && !promo.branchIds.includes(branchId)) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "Promotion not valid for this branch",
+        });
+      }
+
+      // Enrich cart items with brand/category for product scope filtering
+      const enrichedItems: CartItemForPromo[] = [];
+      const categoryBrandCache = new Map<string, string>();
+
+      for (const vi of validatedItems) {
+        const variant = await ctx.db.get(vi.variantId);
+        if (!variant) continue;
+        const style = await ctx.db.get(variant.styleId);
+        if (!style) continue;
+
+        const categoryId = String(style.categoryId);
+        let brandId2 = categoryBrandCache.get(categoryId);
+        if (!brandId2) {
+          const cat = await ctx.db.get(style.categoryId);
+          brandId2 = cat ? String(cat.brandId) : "";
+          categoryBrandCache.set(categoryId, brandId2);
+        }
+
+        enrichedItems.push({
+          variantId: String(vi.variantId),
+          brandId: brandId2,
+          categoryId,
+          unitPriceCentavos: vi.unitPriceCentavos,
+          quantity: vi.quantity,
+        });
+      }
+
+      const promoResult = calculatePromoDiscount(enrichedItems, {
+        name: promo.name,
+        promoType: promo.promoType,
+        percentageValue: promo.percentageValue,
+        maxDiscountCentavos: promo.maxDiscountCentavos,
+        fixedAmountCentavos: promo.fixedAmountCentavos,
+        buyQuantity: promo.buyQuantity,
+        getQuantity: promo.getQuantity,
+        minSpendCentavos: promo.minSpendCentavos,
+        tieredDiscountCentavos: promo.tieredDiscountCentavos,
+        brandIds: promo.brandIds.map(String),
+        categoryIds: promo.categoryIds.map(String),
+        variantIds: promo.variantIds.map(String),
+      });
+
+      if (promoResult.applicable) {
+        promoDiscountCentavos = promoResult.discountCentavos;
+        appliedPromotionId = promo._id;
+      }
+    }
+
+    const finalTotalCentavos = taxBreakdown.totalCentavos - promoDiscountCentavos;
+
     // 7. Validate cash sufficiency
     if (
       args.paymentMethod === "cash" &&
-      args.amountTenderedCentavos! < taxBreakdown.totalCentavos
+      args.amountTenderedCentavos! < finalTotalCentavos
     ) {
       throw new ConvexError({
         code: "INVALID_PAYMENT",
@@ -171,7 +254,7 @@ export const createTransaction = mutation({
     // 9. Insert transaction record
     const changeCentavos =
       args.paymentMethod === "cash"
-        ? args.amountTenderedCentavos! - taxBreakdown.totalCentavos
+        ? args.amountTenderedCentavos! - finalTotalCentavos
         : undefined;
 
     const transactionId = await ctx.db.insert("transactions", {
@@ -181,9 +264,12 @@ export const createTransaction = mutation({
       subtotalCentavos: taxBreakdown.subtotalCentavos,
       vatAmountCentavos: taxBreakdown.vatAmountCentavos,
       discountAmountCentavos: taxBreakdown.discountAmountCentavos,
-      totalCentavos: taxBreakdown.totalCentavos,
+      totalCentavos: finalTotalCentavos,
       paymentMethod: args.paymentMethod,
       discountType: args.discountType,
+      promotionId: appliedPromotionId,
+      promoDiscountAmountCentavos:
+        promoDiscountCentavos > 0 ? promoDiscountCentavos : undefined,
       amountTenderedCentavos:
         args.paymentMethod === "cash"
           ? args.amountTenderedCentavos
@@ -245,9 +331,11 @@ export const createTransaction = mutation({
       entityId: transactionId,
       after: {
         receiptNumber,
-        totalCentavos: taxBreakdown.totalCentavos,
+        totalCentavos: finalTotalCentavos,
         paymentMethod: args.paymentMethod,
         itemCount: args.items.length,
+        promotionId: appliedPromotionId ?? null,
+        promoDiscountCentavos,
       },
     });
 
@@ -255,8 +343,9 @@ export const createTransaction = mutation({
     return {
       transactionId,
       receiptNumber,
-      totalCentavos: taxBreakdown.totalCentavos,
+      totalCentavos: finalTotalCentavos,
       changeCentavos: changeCentavos ?? 0,
+      promoDiscountCentavos,
     };
   },
 });

@@ -6,6 +6,7 @@ import { api } from "@/convex/_generated/api";
 import { ConvexError } from "convex/values";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/formatters";
+import { ReadingReport, type ReadingData } from "@/components/pos/ReadingReport";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -16,6 +17,9 @@ import {
   CreditCard,
   Smartphone,
   Hash,
+  FileBarChart,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -55,6 +59,7 @@ export function ReconciliationPanel() {
   const summary = useQuery(api.pos.reconciliation.getDailySummary, {
     date: todayDate,
   });
+  const zReading = useQuery(api.pos.readings.getZReading, { date: todayDate });
   const submitReconciliation = useMutation(
     api.pos.reconciliation.submitReconciliation
   );
@@ -64,6 +69,7 @@ export function ReconciliationPanel() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ReconciliationResult | null>(null);
+  const [showZReading, setShowZReading] = useState(false);
 
   // Compute difference as user types
   const physicalCashCentavos = useMemo(() => {
@@ -164,6 +170,31 @@ export function ReconciliationPanel() {
             </div>
           </div>
 
+          {/* Z-Reading after reconciliation */}
+          {zReading && (
+            <div className="text-left">
+              <button
+                onClick={() => setShowZReading(!showZReading)}
+                className="flex w-full items-center justify-between rounded-lg border p-3 text-sm font-medium hover:bg-muted transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <FileBarChart className="h-4 w-4 text-red-600" />
+                  View Z-Reading (End of Day Report)
+                </span>
+                {showZReading ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+              {showZReading && (
+                <div className="mt-3">
+                  <ReadingReport data={zReading as ReadingData} showPrint />
+                </div>
+              )}
+            </div>
+          )}
+
           <Link href="/pos">
             <Button className="min-h-14 w-full gap-2 text-lg">
               <ArrowLeft className="h-5 w-5" />
@@ -187,9 +218,34 @@ export function ReconciliationPanel() {
           <ArrowLeft className="h-4 w-4" />
           Back to POS
         </Link>
-        <h1 className="mt-2 text-2xl font-bold">End of Day Reconciliation</h1>
+        <h1 className="mt-2 text-2xl font-bold">End of Day — Z-Reading</h1>
         <p className="text-muted-foreground">{formatDateLabel(todayDate)}</p>
       </div>
+
+      {/* Z-Reading Summary (expanded) */}
+      {zReading && (
+        <div className="mb-6">
+          <button
+            onClick={() => setShowZReading(!showZReading)}
+            className="flex w-full items-center justify-between rounded-lg border p-3 text-sm font-medium hover:bg-muted transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <FileBarChart className="h-4 w-4 text-red-600" />
+              Z-Reading — Full Day Report
+            </span>
+            {showZReading ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </button>
+          {showZReading && (
+            <div className="mt-3 rounded-lg border p-4">
+              <ReadingReport data={zReading as ReadingData} showPrint />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Daily Summary */}
       <div className="mb-6 space-y-3">
@@ -251,12 +307,22 @@ export function ReconciliationPanel() {
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">Cash Reconciliation</h2>
 
-        {/* Expected Cash (read-only) */}
-        <div className="rounded-lg border bg-muted/50 p-4">
-          <p className="text-sm text-muted-foreground">Expected Cash (System)</p>
+        {/* Expected Cash (read-only) — cash fund + cash sales */}
+        <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
+          <p className="text-sm text-muted-foreground">Expected Cash in Drawer</p>
           <p className="text-2xl font-bold">
             {formatCurrency(summary.expectedCashCentavos)}
           </p>
+          <div className="border-t pt-2 space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Cash Fund (all shifts)</span>
+              <span className="font-medium">{formatCurrency(summary.totalCashFundCentavos)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">+ Cash Sales</span>
+              <span className="font-medium">{formatCurrency(summary.cashSalesCentavos)}</span>
+            </div>
+          </div>
         </div>
 
         {/* Physical Cash Input */}

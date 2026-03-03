@@ -18,6 +18,8 @@ import {
   ArrowLeft,
   Check,
   Loader2,
+  Tag,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -30,6 +32,8 @@ import { enqueueTransaction, decrementStockItem } from "@/lib/offlineQueue";
 import type { DiscountType, PaymentMethod } from "@/lib/constants";
 import type { Id } from "@/convex/_generated/dataModel";
 import { ReceiptViewer } from "@/components/pos/ReceiptViewer";
+import { usePromoPreview } from "@/lib/hooks/usePromoPreview";
+import type { PromoResult } from "@/convex/_helpers/promoCalculations";
 
 type TransactionResult = {
   transactionId: Id<"transactions">;
@@ -43,7 +47,10 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
   const {
     items, heldTransactions, updateQuantity, removeItem, clearCart,
     holdTransaction, resumeTransaction, discountType, setDiscountType, taxBreakdown,
+    selectedPromoId, setPromoId,
   } = usePOSCart();
+
+  const { activePromos, promoPreview } = usePromoPreview(items, selectedPromoId, discountType);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
@@ -96,6 +103,10 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
           taxBreakdown={taxBreakdown}
           discountType={discountType}
           setDiscountType={setDiscountType}
+          selectedPromoId={selectedPromoId}
+          setPromoId={setPromoId}
+          activePromos={activePromos}
+          promoPreview={promoPreview}
           heldTransactions={heldTransactions}
           updateQuantity={updateQuantity}
           removeItem={removeItem}
@@ -153,6 +164,8 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
                 items={items}
                 taxBreakdown={taxBreakdown}
                 discountType={discountType}
+                selectedPromoId={selectedPromoId}
+                promoPreview={promoPreview}
                 onComplete={handlePaymentComplete}
                 onCancel={handlePaymentCancel}
               />
@@ -181,10 +194,18 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
                       discountType={discountType}
                       setDiscountType={setDiscountType}
                     />
+                    <PromoSelector
+                      discountType={discountType}
+                      activePromos={activePromos}
+                      selectedPromoId={selectedPromoId}
+                      setPromoId={setPromoId}
+                      promoPreview={promoPreview}
+                    />
                     <CartActions
                       items={items}
                       taxBreakdown={taxBreakdown}
                       discountType={discountType}
+                      promoPreview={promoPreview}
                       holdTransaction={holdTransaction}
                       showClearConfirm={showClearConfirm}
                       setShowClearConfirm={setShowClearConfirm}
@@ -211,7 +232,7 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-bold">{formatCurrency(taxBreakdown.totalCentavos)}</span>
+          <span className="font-bold">{formatCurrency(taxBreakdown.totalCentavos - (promoPreview?.applicable ? promoPreview.discountCentavos : 0))}</span>
           {isExpanded ? (
             <ChevronDown className="h-5 w-5" />
           ) : (
@@ -372,12 +393,85 @@ function DiscountToggle({
   );
 }
 
+// ─── Promo Selector ─────────────────────────────────────────────────────
+
+function PromoSelector({
+  discountType,
+  activePromos,
+  selectedPromoId,
+  setPromoId,
+  promoPreview,
+}: {
+  discountType: DiscountType;
+  activePromos: ActivePromo[];
+  selectedPromoId: string | null;
+  setPromoId: (promoId: string | null) => void;
+  promoPreview: PromoResult | null;
+}) {
+  // Only show when discount type is "none" (promos don't stack with Senior/PWD)
+  if (discountType !== "none") return null;
+  if (activePromos.length === 0) return null;
+
+  const selectedPromo = selectedPromoId
+    ? activePromos.find((p) => String(p._id) === selectedPromoId)
+    : null;
+
+  return (
+    <div className="mt-3">
+      <p className="mb-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        Promotions
+      </p>
+
+      {selectedPromo ? (
+        <div className="flex items-center gap-2 rounded-md border border-orange-400 bg-orange-50 px-3 py-2">
+          <Tag className="h-4 w-4 text-orange-600 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-orange-900 truncate">
+              {selectedPromo.name}
+            </p>
+            {promoPreview?.applicable && promoPreview.discountCentavos > 0 && (
+              <p className="text-xs text-orange-700">
+                Save {formatCurrency(promoPreview.discountCentavos)}
+              </p>
+            )}
+            {promoPreview && !promoPreview.applicable && (
+              <p className="text-xs text-muted-foreground">
+                {promoPreview.description}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => setPromoId(null)}
+            className="shrink-0 rounded-sm p-0.5 text-orange-600 hover:bg-orange-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {activePromos.map((promo) => (
+            <button
+              key={String(promo._id)}
+              onClick={() => setPromoId(String(promo._id))}
+              className="flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:border-orange-400 hover:bg-orange-50"
+            >
+              <Tag className="h-3.5 w-3.5 text-orange-500" />
+              {promo.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Cart Actions ────────────────────────────────────────────────────────────
 
 function CartActions({
   items,
   taxBreakdown,
   discountType,
+  promoPreview,
   holdTransaction,
   showClearConfirm,
   setShowClearConfirm,
@@ -387,6 +481,7 @@ function CartActions({
   items: CartItem[];
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
+  promoPreview: PromoResult | null;
   holdTransaction: () => string | null;
   showClearConfirm: boolean;
   setShowClearConfirm: (v: boolean) => void;
@@ -394,6 +489,8 @@ function CartActions({
   onCompleteSale: () => void;
 }) {
   const isDiscounted = discountType !== "none";
+  const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
+  const displayTotal = taxBreakdown.totalCentavos - promoDiscount;
 
   return (
     <div className="mt-4 border-t pt-4">
@@ -420,15 +517,33 @@ function CartActions({
           </div>
         )}
 
+        {promoPreview?.applicable && promoDiscount > 0 && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-orange-600">
+              Promo ({promoPreview.description})
+            </span>
+            <span className="text-orange-600">
+              -{formatCurrency(promoDiscount)}
+            </span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between pt-1 text-lg font-bold">
           <span>Total</span>
-          <span>{formatCurrency(taxBreakdown.totalCentavos)}</span>
+          <span>{formatCurrency(displayTotal)}</span>
         </div>
 
         {isDiscounted && taxBreakdown.savingsCentavos > 0 && (
           <div className="flex items-center justify-between text-sm font-medium text-green-600">
             <span>You save</span>
             <span>{formatCurrency(taxBreakdown.savingsCentavos)}</span>
+          </div>
+        )}
+
+        {promoDiscount > 0 && !isDiscounted && (
+          <div className="flex items-center justify-between text-sm font-medium text-green-600">
+            <span>You save</span>
+            <span>{formatCurrency(promoDiscount)}</span>
           </div>
         )}
       </div>
@@ -481,7 +596,7 @@ function CartActions({
         disabled={items.length === 0}
         onClick={onCompleteSale}
       >
-        Complete Sale {items.length > 0 ? `\u00B7 ${formatCurrency(taxBreakdown.totalCentavos)}` : ""}
+        Complete Sale {items.length > 0 ? `\u00B7 ${formatCurrency(displayTotal)}` : ""}
       </Button>
     </div>
   );
@@ -489,12 +604,24 @@ function CartActions({
 
 // ─── Desktop Cart Content ────────────────────────────────────────────────────
 
+type ActivePromo = {
+  _id: Id<"promotions">;
+  name: string;
+  description?: string;
+  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered";
+  priority: number;
+};
+
 function CartContent({
   items,
   totalItems,
   taxBreakdown,
   discountType,
   setDiscountType,
+  selectedPromoId,
+  setPromoId,
+  activePromos,
+  promoPreview,
   heldTransactions,
   updateQuantity,
   removeItem,
@@ -513,6 +640,10 @@ function CartContent({
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
   setDiscountType: (type: DiscountType) => void;
+  selectedPromoId: string | null;
+  setPromoId: (promoId: string | null) => void;
+  activePromos: ActivePromo[];
+  promoPreview: PromoResult | null;
   heldTransactions: { id: string; items: CartItem[]; heldAt: number; discountType: DiscountType }[];
   updateQuantity: (variantId: CartItem["variantId"], delta: number) => void;
   removeItem: (variantId: CartItem["variantId"]) => void;
@@ -573,6 +704,8 @@ function CartContent({
               items={items}
               taxBreakdown={taxBreakdown}
               discountType={discountType}
+              selectedPromoId={selectedPromoId}
+              promoPreview={promoPreview}
               onComplete={onPaymentComplete}
               onCancel={onPaymentCancel}
             />
@@ -582,10 +715,18 @@ function CartContent({
                 discountType={discountType}
                 setDiscountType={setDiscountType}
               />
+              <PromoSelector
+                discountType={discountType}
+                activePromos={activePromos}
+                selectedPromoId={selectedPromoId}
+                setPromoId={setPromoId}
+                promoPreview={promoPreview}
+              />
               <CartActions
                 items={items}
                 taxBreakdown={taxBreakdown}
                 discountType={discountType}
+                promoPreview={promoPreview}
                 holdTransaction={holdTransaction}
                 showClearConfirm={showClearConfirm}
                 setShowClearConfirm={setShowClearConfirm}
@@ -621,12 +762,16 @@ function PaymentPanel({
   items,
   taxBreakdown,
   discountType,
+  selectedPromoId,
+  promoPreview,
   onComplete,
   onCancel,
 }: {
   items: CartItem[];
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
+  selectedPromoId: string | null;
+  promoPreview: PromoResult | null;
   onComplete: (result: TransactionResult) => void;
   onCancel: () => void;
 }) {
@@ -639,7 +784,8 @@ function PaymentPanel({
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const totalCentavos = taxBreakdown.totalCentavos;
+  const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
+  const totalCentavos = taxBreakdown.totalCentavos - promoDiscount;
   const changeCentavos =
     amountTendered !== null ? amountTendered - totalCentavos : null;
   const isCashSufficient = amountTendered !== null && amountTendered >= totalCentavos;
@@ -718,6 +864,9 @@ function PaymentPanel({
         discountType,
         amountTenderedCentavos:
           paymentMethod === "cash" ? amountTendered! : undefined,
+        promotionId: selectedPromoId && discountType === "none"
+          ? (selectedPromoId as Id<"promotions">)
+          : undefined,
       });
 
       onComplete({
