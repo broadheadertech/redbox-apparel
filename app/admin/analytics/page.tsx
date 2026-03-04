@@ -165,6 +165,16 @@ function getPresetMs(preset: DatePreset): { startMs: number; endMs: number; labe
   return { startMs: yearStartPht - PHT, endMs: nowMs, label: "This Year" };
 }
 
+// ─── Velocity Day Presets ─────────────────────────────────────────────────────
+
+const VELOCITY_DAYS = [1, 7, 14, 30, 60, 90] as const;
+
+const MI_COLORS = {
+  FAST_MOVING: { badge: "bg-green-100 text-green-800 border-green-200", text: "text-green-600", label: "Fast" },
+  MEDIUM_MOVING: { badge: "bg-amber-100 text-amber-800 border-amber-200", text: "text-amber-600", label: "Medium" },
+  SLOW_MOVING: { badge: "bg-red-100 text-red-800 border-red-200", text: "text-red-600", label: "Slow" },
+} as const;
+
 // ─── Tab Types ────────────────────────────────────────────────────────────────
 
 type AnalyticsTab = "descriptive" | "diagnostic" | "predictive" | "prescriptive";
@@ -183,8 +193,18 @@ const ANALYTICS_TABS: { value: AnalyticsTab; label: string; description: string 
 export default function HQAnalyticsPage() {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>("descriptive");
   const [datePreset, setDatePreset] = useState<DatePreset>("weekly");
+  const [velocityDays, setVelocityDays] = useState<(typeof VELOCITY_DAYS)[number]>(7);
 
   const { startMs, endMs, label: periodLabel } = useMemo(() => getPresetMs(datePreset), [datePreset]);
+
+  const velocityPeriod = useMemo(() => {
+    const PHT = 8 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const nowPht = nowMs + PHT;
+    const todayMidnightPht = nowPht - (nowPht % (24 * 60 * 60 * 1000));
+    const todayStartMs = todayMidnightPht - PHT;
+    return { startMs: todayStartMs - (velocityDays - 1) * 24 * 60 * 60 * 1000, endMs: nowMs };
+  }, [velocityDays]);
 
   // Descriptive
   const salesSummary = useQuery(
@@ -207,7 +227,7 @@ export default function HQAnalyticsPage() {
   // Diagnostic
   const velocity = useQuery(
     api.dashboards.hqDdpAnalytics.getHQProductVelocity,
-    activeTab === "diagnostic" ? { startMs, endMs } : "skip"
+    activeTab === "diagnostic" ? { startMs: velocityPeriod.startMs, endMs: velocityPeriod.endMs } : "skip"
   );
   const demandGap = useQuery(
     api.dashboards.hqDdpAnalytics.getHQDemandGapAnalysis,
@@ -494,84 +514,93 @@ export default function HQAnalyticsPage() {
       {/* ═══ DIAGNOSTIC TAB ═══════════════════════════════════════════════ */}
       {activeTab === "diagnostic" && (
         <div className="space-y-6">
-          {/* Fast & Slow Movers */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Fast Movers */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-green-700">Fast Movers (All Branches)</h3>
-              <p className="text-xs text-muted-foreground">Products selling consistently across multiple days</p>
-              {velocity === undefined ? (
-                <Skeleton className="h-40" />
-              ) : !velocity || velocity.fastMovers.length === 0 ? (
-                <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                  No consistent fast-selling products detected
-                </div>
-              ) : (
-                <div className="rounded-lg border overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Avg/Day</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sell Days</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {velocity.fastMovers.map((item) => (
-                        <tr key={item.variantId} className="border-b last:border-0">
-                          <td className="px-3 py-2">
-                            <p className="font-medium">{item.styleName}</p>
-                            <p className="text-muted-foreground">{item.size} / {item.color}</p>
-                          </td>
-                          <td className="px-3 py-2 text-right font-medium text-green-600">{item.avgDaily}</td>
-                          <td className="px-3 py-2 text-right text-muted-foreground">{item.sellDays}d</td>
-                          <td className="px-3 py-2 text-right">{item.currentStock}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+          {/* Product Movement Index */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">Product Movement Index (All Branches)</h3>
+                <p className="text-xs text-muted-foreground">MI = ADS / DSI — classifies inventory movement speed</p>
+              </div>
+              <div className="flex items-center gap-1 rounded-lg border p-1">
+                {VELOCITY_DAYS.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setVelocityDays(d)}
+                    className={cn(
+                      "px-2.5 py-1 text-xs rounded-md font-medium transition-colors",
+                      velocityDays === d
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-muted"
+                    )}
+                  >
+                    {d}D
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Slow Movers */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-amber-700">Slow Movers (All Branches)</h3>
-              {velocity === undefined ? (
-                <Skeleton className="h-40" />
-              ) : !velocity || velocity.slowMovers.length === 0 ? (
-                <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                  No slow-moving items detected
-                </div>
-              ) : (
-                <div className="rounded-lg border overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Avg/Day</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sell Days</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {velocity.slowMovers.map((item) => (
-                        <tr key={item.variantId} className="border-b last:border-0">
-                          <td className="px-3 py-2">
-                            <p className="font-medium">{item.styleName}</p>
-                            <p className="text-muted-foreground">{item.size} / {item.color}</p>
-                          </td>
-                          <td className="px-3 py-2 text-right font-medium text-amber-600">{item.avgDaily}</td>
-                          <td className="px-3 py-2 text-right text-muted-foreground">{item.sellDays}d</td>
-                          <td className="px-3 py-2 text-right">{item.currentStock}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+            {velocity === undefined ? (
+              <Skeleton className="h-60" />
+            ) : !velocity ? (
+              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                No movement data available
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {(["FAST_MOVING", "MEDIUM_MOVING", "SLOW_MOVING"] as const).map((tier) => {
+                  const items = tier === "FAST_MOVING" ? velocity.fastMoving : tier === "MEDIUM_MOVING" ? velocity.mediumMoving : velocity.slowMoving;
+                  const colors = MI_COLORS[tier];
+                  return (
+                    <div key={tier} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${colors.badge}`}>
+                          {colors.label}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {items.length} product{items.length !== 1 ? "s" : ""}
+                          {tier === "FAST_MOVING" && " — MI ≥ 0.30"}
+                          {tier === "MEDIUM_MOVING" && " — MI 0.10–0.29"}
+                          {tier === "SLOW_MOVING" && " — MI < 0.10"}
+                        </span>
+                      </div>
+                      {items.length === 0 ? (
+                        <div className="rounded-lg border p-4 text-center text-xs text-muted-foreground">
+                          No {colors.label.toLowerCase()}-moving products
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border overflow-hidden">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-muted/50 border-b">
+                                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">ADS</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">DSI</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">MI</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {items.map((item) => (
+                                <tr key={item.variantId} className="border-b last:border-0">
+                                  <td className="px-3 py-2">
+                                    <p className="font-medium">{item.styleName}</p>
+                                    <p className="text-muted-foreground">{item.size} / {item.color}</p>
+                                  </td>
+                                  <td className="px-3 py-2 text-right">{item.ads}/day</td>
+                                  <td className="px-3 py-2 text-right">{item.dsi}d</td>
+                                  <td className={`px-3 py-2 text-right font-medium ${colors.text}`}>{item.mi}</td>
+                                  <td className="px-3 py-2 text-right">{item.currentStock}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Demand Gap + Transfer Efficiency */}

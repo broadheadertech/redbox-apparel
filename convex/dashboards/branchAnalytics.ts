@@ -344,30 +344,35 @@ export const getProductVelocity = query({
       ...inventory.filter((i) => i.quantity > 0).map((i) => i.variantId as string),
     ]);
 
-    const entries: { variantId: string; totalSold: number; avgDaily: number; sellDays: number; currentStock: number }[] = [];
+    // Movement Index formula:
+    // ADS = Total Units Sold / Number of Days
+    // DSI = Current Inventory / ADS
+    // MI  = ADS / DSI  (simplified: ADS² / Current Inventory)
+    // FAST_MOVING: MI >= 0.30 | MEDIUM_MOVING: 0.10 <= MI < 0.30 | SLOW_MOVING: MI < 0.10
+
+    const entries: {
+      variantId: string; totalSold: number; ads: number; dsi: number;
+      mi: number; classification: "FAST_MOVING" | "MEDIUM_MOVING" | "SLOW_MOVING";
+      sellDays: number; currentStock: number;
+    }[] = [];
+
     for (const vid of allVariantIds) {
       const totalSold = variantSales.get(vid) ?? 0;
-      entries.push({
-        variantId: vid,
-        totalSold,
-        avgDaily: Math.round(totalSold / durationDays),
-        sellDays: variantSellDays.get(vid)?.size ?? 0,
-        currentStock: inventoryMap.get(vid) ?? 0,
-      });
+      const currentStock = inventoryMap.get(vid) ?? 0;
+      const sellDays = variantSellDays.get(vid)?.size ?? 0;
+      const ads = totalSold / durationDays;
+      const dsi = ads > 0 ? currentStock / ads : (currentStock > 0 ? 9999 : 0);
+      const mi = dsi > 0 ? ads / dsi : (ads > 0 ? 999 : 0);
+      const classification = mi >= 0.30 ? "FAST_MOVING" as const : mi >= 0.10 ? "MEDIUM_MOVING" as const : "SLOW_MOVING" as const;
+      entries.push({ variantId: vid, totalSold, ads: Math.round(ads), dsi: Math.round(dsi), mi: Math.round(mi * 100) / 100, classification, sellDays, currentStock });
     }
 
-    // Fast movers: must sell on ≥2 distinct days to filter out single-day spikes
-    const fastMovers = [...entries]
-      .filter((e) => e.sellDays >= 2)
-      .sort((a, b) => b.avgDaily - a.avgDaily)
-      .slice(0, 5);
-    const slowMovers = entries
-      .filter((e) => e.currentStock > 0)
-      .sort((a, b) => a.avgDaily - b.avgDaily)
-      .slice(0, 5);
+    const fastMoving = entries.filter((e) => e.classification === "FAST_MOVING").sort((a, b) => b.mi - a.mi).slice(0, 10);
+    const mediumMoving = entries.filter((e) => e.classification === "MEDIUM_MOVING").sort((a, b) => b.mi - a.mi).slice(0, 10);
+    const slowMoving = entries.filter((e) => e.classification === "SLOW_MOVING").sort((a, b) => a.mi - b.mi).slice(0, 10);
 
     const variantCache = new Map<string, { sku: string; styleName: string; size: string; color: string }>();
-    async function enrich(items: typeof fastMovers) {
+    async function enrich(items: typeof fastMoving) {
       return Promise.all(
         items.map(async (item) => {
           let info = variantCache.get(item.variantId);
@@ -388,8 +393,9 @@ export const getProductVelocity = query({
     }
 
     return {
-      fastMovers: await enrich(fastMovers),
-      slowMovers: await enrich(slowMovers),
+      fastMoving: await enrich(fastMoving),
+      mediumMoving: await enrich(mediumMoving),
+      slowMoving: await enrich(slowMoving),
     };
   },
 });
