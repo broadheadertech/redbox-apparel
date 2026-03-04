@@ -128,23 +128,12 @@ export default function ProductMoversPage() {
           return (a.currentStock - b.currentStock) * dir;
         case "sold":
           return (a.totalSold - b.totalSold) * dir;
-        case "rate":
-          return (a.dailySalesRate - b.dailySalesRate) * dir;
-        case "dos": {
-          const dosA =
-            a.daysOfSupply === null
-              ? a.currentStock > 0
-                ? 999999
-                : -1
-              : a.daysOfSupply;
-          const dosB =
-            b.daysOfSupply === null
-              ? b.currentStock > 0
-                ? 999999
-                : -1
-              : b.daysOfSupply;
-          return (dosA - dosB) * dir;
-        }
+        case "ads":
+          return (a.ads - b.ads) * dir;
+        case "dsi":
+          return (a.dsi - b.dsi) * dir;
+        case "mi":
+          return (a.mi - b.mi) * dir;
         default:
           return 0; // classification = default sort from server
       }
@@ -189,8 +178,9 @@ export default function ProductMoversPage() {
         "Brand",
         "Stock",
         "Units Sold",
-        "Daily Rate",
-        "Days of Supply",
+        "ADS",
+        "DSI",
+        "MI",
         "Classification",
       ],
       ...filteredItems.map((item) => [
@@ -201,12 +191,9 @@ export default function ProductMoversPage() {
         item.brandName,
         String(item.currentStock),
         String(item.totalSold),
-        item.dailySalesRate.toFixed(1),
-        item.daysOfSupply === null
-          ? "\u2014"
-          : item.daysOfSupply >= 999999
-            ? "\u221E"
-            : String(item.daysOfSupply),
+        String(item.ads),
+        String(item.dsi),
+        String(item.mi),
         item.classification,
       ]),
     ];
@@ -255,7 +242,7 @@ export default function ProductMoversPage() {
         <div>
           <h1 className="text-2xl font-bold">Product Movers Analysis</h1>
           <p className="text-sm text-muted-foreground">
-            2-axis classification: sales velocity &times; days of supply
+            Movement Index classification: MI = ADS&sup2; / Stock
           </p>
         </div>
 
@@ -423,44 +410,35 @@ export default function ProductMoversPage() {
                     onClick={() => handleSort("stock")}
                   >
                     Stock{" "}
-                    {sortCol === "stock"
-                      ? sortDir === "asc"
-                        ? "\u2191"
-                        : "\u2193"
-                      : ""}
+                    {sortCol === "stock" ? (sortDir === "asc" ? "\u2191" : "\u2193") : ""}
                   </th>
                   <th
                     className="px-4 py-3 font-medium cursor-pointer hover:text-primary"
                     onClick={() => handleSort("sold")}
                   >
                     Sold{" "}
-                    {sortCol === "sold"
-                      ? sortDir === "asc"
-                        ? "\u2191"
-                        : "\u2193"
-                      : ""}
+                    {sortCol === "sold" ? (sortDir === "asc" ? "\u2191" : "\u2193") : ""}
                   </th>
                   <th
                     className="px-4 py-3 font-medium cursor-pointer hover:text-primary"
-                    onClick={() => handleSort("rate")}
+                    onClick={() => handleSort("ads")}
                   >
-                    Daily Rate{" "}
-                    {sortCol === "rate"
-                      ? sortDir === "asc"
-                        ? "\u2191"
-                        : "\u2193"
-                      : ""}
+                    ADS{" "}
+                    {sortCol === "ads" ? (sortDir === "asc" ? "\u2191" : "\u2193") : ""}
                   </th>
                   <th
                     className="px-4 py-3 font-medium cursor-pointer hover:text-primary"
-                    onClick={() => handleSort("dos")}
+                    onClick={() => handleSort("dsi")}
                   >
-                    DOS{" "}
-                    {sortCol === "dos"
-                      ? sortDir === "asc"
-                        ? "\u2191"
-                        : "\u2193"
-                      : ""}
+                    DSI{" "}
+                    {sortCol === "dsi" ? (sortDir === "asc" ? "\u2191" : "\u2193") : ""}
+                  </th>
+                  <th
+                    className="px-4 py-3 font-medium cursor-pointer hover:text-primary"
+                    onClick={() => handleSort("mi")}
+                  >
+                    MI{" "}
+                    {sortCol === "mi" ? (sortDir === "asc" ? "\u2191" : "\u2193") : ""}
                   </th>
                   <th className="px-4 py-3 font-medium">Classification</th>
                 </tr>
@@ -491,14 +469,15 @@ export default function ProductMoversPage() {
                         {item.totalSold}
                       </td>
                       <td className="px-4 py-3 tabular-nums">
-                        {item.dailySalesRate.toFixed(1)}/day
+                        {item.ads}/day
                       </td>
                       <td className="px-4 py-3 tabular-nums">
-                        {item.daysOfSupply === null
-                          ? "\u2014"
-                          : item.daysOfSupply >= 999999
-                            ? "\u221E"
-                            : `${item.daysOfSupply}d`}
+                        {item.dsi === 0 ? "\u2014" : `${item.dsi}d`}
+                      </td>
+                      <td className={`px-4 py-3 tabular-nums font-medium ${
+                        item.mi >= 0.30 ? "text-green-600" : item.mi >= 0.10 ? "text-amber-600" : item.mi > 0 ? "text-red-600" : "text-gray-400"
+                      }`}>
+                        {item.mi}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -534,8 +513,7 @@ export default function ProductMoversPage() {
           <p className="text-xs text-muted-foreground text-center">
             {moversData.meta.totalVariants} variants analyzed over{" "}
             {moversData.meta.periodDays} days
-            {moversData.meta.p25 > 0 &&
-              ` \u00B7 Velocity thresholds: P25=${moversData.meta.p25.toFixed(1)}, P75=${moversData.meta.p75.toFixed(1)} units/day`}
+            {" \u00B7 MI thresholds: Fast \u2265 0.30, Normal 0.10\u20130.29, Slow < 0.10"}
           </p>
         )}
       </div>

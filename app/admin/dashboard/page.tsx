@@ -421,7 +421,7 @@ export default function HqDashboardPage() {
                 <p className="font-medium text-red-800">Urgent Restock Needed</p>
                 {moversOverview.urgentRestock.map((item, i) => (
                   <p key={i} className="text-red-700 mt-0.5">
-                    {item.styleName} ({item.size}/{item.color}) &mdash; {item.daysOfSupply}d left
+                    {item.styleName} ({item.size}/{item.color}) &mdash; {item.dsi}d left
                   </p>
                 ))}
               </div>

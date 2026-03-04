@@ -17,9 +17,21 @@ function getPhilippineDateRange(dateStr: string): { startMs: number; endMs: numb
 }
 
 // ─── Classification types ────────────────────────────────────────────────────
+// Movement Index (MI) formula:
+//   ADS = Total Units Sold / Number of Days
+//   DSI = Current Inventory / ADS
+//   MI  = ADS / DSI  (simplified: ADS² / Current Inventory)
+//
+// Primary classification by MI:
+//   FAST:   MI >= 0.30
+//   NORMAL: MI 0.10–0.29
+//   SLOW:   MI < 0.10 (but has sales)
+//   DEAD:   0 sales in period
+//
+// Sub-classification by DSI (Days of Supply):
+//   low: < 14d | medium: 14–60d | high: > 60d
 
-type VelocityBucket = "high" | "medium" | "low" | "zero";
-type DosBucket = "low" | "medium" | "high";
+type DsiBucket = "low" | "medium" | "high";
 type Classification = "fast" | "normal" | "slow" | "dead";
 type SubClassification =
   | "fast-restock"
@@ -39,53 +51,33 @@ const CLASS_PRIORITY: Record<Classification, number> = {
   fast: 3,
 };
 
-function classifyDos(dos: number): DosBucket {
-  if (dos < 14) return "low";
-  if (dos <= 60) return "medium";
+function classifyDsi(dsi: number): DsiBucket {
+  if (dsi < 14) return "low";
+  if (dsi <= 60) return "medium";
   return "high";
 }
 
-function matrixLookup(
-  velocity: VelocityBucket,
-  dos: DosBucket
+function classifyByMI(
+  mi: number,
+  hasSales: boolean,
+  dsiBucket: DsiBucket
 ): { classification: Classification; subClassification: SubClassification } {
-  if (velocity === "zero") return { classification: "dead", subClassification: "dead" };
+  if (!hasSales) return { classification: "dead", subClassification: "dead" };
 
-  if (velocity === "high") {
-    if (dos === "low") return { classification: "fast", subClassification: "fast-restock" };
-    if (dos === "medium") return { classification: "fast", subClassification: "fast-healthy" };
+  if (mi >= 0.30) {
+    if (dsiBucket === "low") return { classification: "fast", subClassification: "fast-restock" };
+    if (dsiBucket === "medium") return { classification: "fast", subClassification: "fast-healthy" };
     return { classification: "fast", subClassification: "fast-overstocked" };
   }
-  if (velocity === "medium") {
-    if (dos === "low") return { classification: "normal", subClassification: "normal-watch" };
-    if (dos === "medium") return { classification: "normal", subClassification: "normal" };
+  if (mi >= 0.10) {
+    if (dsiBucket === "low") return { classification: "normal", subClassification: "normal-watch" };
+    if (dsiBucket === "medium") return { classification: "normal", subClassification: "normal" };
     return { classification: "slow", subClassification: "slow-overstock" };
   }
-  // low velocity
-  if (dos === "low") return { classification: "normal", subClassification: "normal-low" };
-  if (dos === "medium") return { classification: "slow", subClassification: "slow-overstock" };
+  // MI < 0.10
+  if (dsiBucket === "low") return { classification: "normal", subClassification: "normal-low" };
+  if (dsiBucket === "medium") return { classification: "slow", subClassification: "slow-overstock" };
   return { classification: "slow", subClassification: "slow-critical" };
-}
-
-function computePercentiles(rates: number[]): { p25: number; p75: number } {
-  if (rates.length === 0) return { p25: 0, p75: 0 };
-  const sorted = [...rates].sort((a, b) => a - b);
-  const p25Idx = Math.floor(sorted.length * 0.25);
-  const p75Idx = Math.floor(sorted.length * 0.75);
-  return { p25: sorted[p25Idx], p75: sorted[Math.min(p75Idx, sorted.length - 1)] };
-}
-
-function classifyVelocity(rate: number, p25: number, p75: number): VelocityBucket {
-  if (rate === 0) return "zero";
-  if (p25 === p75) {
-    // All non-zero rates are identical — use simple thresholds
-    if (rate >= 1) return "high";
-    if (rate >= 0.1) return "medium";
-    return "low";
-  }
-  if (rate >= p75) return "high";
-  if (rate >= p25) return "medium";
-  return "low";
 }
 
 // ─── Shared aggregation logic ────────────────────────────────────────────────
@@ -160,66 +152,50 @@ async function aggregateMovers(
     allVariantIds.add(vid);
   }
 
-  // Compute metrics per variant
+  // Compute metrics per variant using Movement Index
   const entries: {
     variantId: string;
     totalSold: number;
-    dailySalesRate: number;
+    ads: number;
+    dsi: number;
+    mi: number;
     currentStock: number;
-    daysOfSupply: number | null; // null = no stock, 999999 = dead (sentinel for Infinity)
-    velocityBucket: VelocityBucket;
-    dosBucket: DosBucket;
     classification: Classification;
     subClassification: SubClassification;
   }[] = [];
 
-  // First pass: compute rates for percentile calculation
-  const nonZeroRates: number[] = [];
-  const rawEntries: { variantId: string; totalSold: number; dailySalesRate: number; currentStock: number }[] = [];
-
   for (const vid of allVariantIds) {
     const totalSold = soldMap.get(vid) ?? 0;
     const currentStock = stockMap.get(vid) ?? 0;
-    const dailySalesRate = Math.round((totalSold / periodDays) * 10) / 10;
-    if (dailySalesRate > 0) nonZeroRates.push(dailySalesRate);
-    rawEntries.push({ variantId: vid, totalSold, dailySalesRate, currentStock });
-  }
+    if (totalSold === 0 && currentStock === 0) continue;
 
-  const { p25, p75 } = computePercentiles(nonZeroRates);
+    const ads = totalSold / periodDays;
+    const dsi = ads > 0 ? currentStock / ads : 0;
+    const mi = ads > 0 && currentStock > 0 ? (ads * ads) / currentStock : (ads > 0 ? 999 : 0);
+    const hasSales = totalSold > 0;
 
-  // Second pass: classify
-  for (const raw of rawEntries) {
-    const velocityBucket = classifyVelocity(raw.dailySalesRate, p25, p75);
+    // DSI bucket for sub-classification
+    const dsiBucket: DsiBucket = !hasSales || currentStock <= 0
+      ? "low"
+      : dsi >= 999
+        ? "high"
+        : classifyDsi(dsi);
 
-    let daysOfSupply: number | null;
-    if (raw.currentStock <= 0) {
-      daysOfSupply = null;
-    } else if (raw.dailySalesRate === 0) {
-      daysOfSupply = 999999; // Sentinel for Infinity (not valid JSON)
-    } else {
-      daysOfSupply = Math.round(raw.currentStock / raw.dailySalesRate);
-    }
-
-    // For classification: if no stock, treat DOS bucket as "low" (doesn't matter for zero-stock items)
-    const dosBucket = daysOfSupply === null
-      ? "low" as DosBucket
-      : daysOfSupply >= 999999
-        ? "high" as DosBucket
-        : classifyDos(daysOfSupply);
-
-    const { classification, subClassification } = matrixLookup(velocityBucket, dosBucket);
+    const { classification, subClassification } = classifyByMI(mi, hasSales, dsiBucket);
 
     entries.push({
-      ...raw,
-      daysOfSupply,
-      velocityBucket,
-      dosBucket,
+      variantId: vid,
+      totalSold,
+      ads: Math.round(ads),
+      dsi: Math.round(dsi),
+      mi: Math.round(mi * 100) / 100,
+      currentStock,
       classification,
       subClassification,
     });
   }
 
-  return { entries, periodDays, p25, p75 };
+  return { entries, periodDays };
 }
 
 // ─── getProductMovers ────────────────────────────────────────────────────────
@@ -233,7 +209,7 @@ export const getProductMovers = query({
   handler: async (ctx, args) => {
     await requireRole(ctx, HQ_ROLES);
 
-    const { entries, periodDays, p25, p75 } = await aggregateMovers(ctx, args);
+    const { entries, periodDays } = await aggregateMovers(ctx, args);
 
     // 4-wave batch enrichment (variant → style → category → brand)
 
@@ -316,31 +292,25 @@ export const getProductMovers = query({
         priceCentavos: variant?.priceCentavos ?? 0,
         currentStock: entry.currentStock,
         totalSold: entry.totalSold,
-        dailySalesRate: entry.dailySalesRate,
-        daysOfSupply: entry.daysOfSupply,
+        ads: entry.ads,
+        dsi: entry.dsi,
+        mi: entry.mi,
         classification: entry.classification,
         subClassification: entry.subClassification,
       };
     });
 
-    // Sort: dead → slow → normal → fast, then DOS ascending
+    // Sort: dead → slow → normal → fast, then MI descending within same class
     items.sort((a, b) => {
       const classDiff = CLASS_PRIORITY[a.classification] - CLASS_PRIORITY[b.classification];
       if (classDiff !== 0) return classDiff;
-      const dosA = a.daysOfSupply ?? -1;
-      const dosB = b.daysOfSupply ?? -1;
-      // 999999 sentinel sorts last within same class
-      if (dosA >= 999999 && dosB < 999999) return 1;
-      if (dosB >= 999999 && dosA < 999999) return -1;
-      return dosA - dosB;
+      return b.mi - a.mi;
     });
 
     return {
       items,
       meta: {
         periodDays,
-        p25,
-        p75,
         totalVariants: items.length,
       },
     };
@@ -390,7 +360,7 @@ export const getMoversOverview = query({
 
     // Enrich only top 3 fast-restock items (minimal enrichment)
     const top3 = fastRestockEntries
-      .sort((a, b) => (a.daysOfSupply ?? 999999) - (b.daysOfSupply ?? 999999))
+      .sort((a, b) => b.mi - a.mi)
       .slice(0, 3);
 
     const urgentRestock = await Promise.all(
@@ -402,7 +372,7 @@ export const getMoversOverview = query({
           styleName: style?.name ?? "Unknown",
           size: variant?.size ?? "—",
           color: variant?.color ?? "—",
-          daysOfSupply: entry.daysOfSupply as number,
+          dsi: entry.dsi,
         };
       })
     );
