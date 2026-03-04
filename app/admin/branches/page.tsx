@@ -48,6 +48,28 @@ const TIMEZONE_OPTIONS = [
   { value: "Asia/Manila", label: "Philippine Standard Time (UTC+8)" },
 ] as const;
 
+const CLASSIFICATION_OPTIONS = [
+  { value: "none", label: "No Classification" },
+  { value: "premium", label: "Premium" },
+  { value: "aclass", label: "A-Class" },
+  { value: "bnc", label: "BNC" },
+  { value: "outlet", label: "Outlet" },
+] as const;
+
+const CLASSIFICATION_LABELS: Record<string, string> = {
+  premium: "Premium",
+  aclass: "A-Class",
+  bnc: "BNC",
+  outlet: "Outlet",
+};
+
+const CLASSIFICATION_COLORS: Record<string, string> = {
+  premium: "bg-purple-100 text-purple-800",
+  aclass: "bg-blue-100 text-blue-800",
+  bnc: "bg-green-100 text-green-800",
+  outlet: "bg-amber-100 text-amber-800",
+};
+
 export default function BranchesPage() {
   const branches = useQuery(api.auth.branches.listBranches);
   const createBranch = useMutation(api.auth.branches.createBranch);
@@ -66,6 +88,7 @@ export default function BranchesPage() {
     address: "",
     phone: "",
     type: "retail" as "retail" | "warehouse",
+    classification: "none",
     latitude: "",
     longitude: "",
     timezone: "none",
@@ -81,6 +104,7 @@ export default function BranchesPage() {
     address: "",
     phone: "",
     type: "retail" as "retail" | "warehouse",
+    classification: "none",
     latitude: "",
     longitude: "",
     timezone: "none",
@@ -105,7 +129,7 @@ export default function BranchesPage() {
   const pagination = usePagination(filteredBranches);
 
   const resetCreateForm = () => {
-    setCreateForm({ name: "", address: "", phone: "", type: "retail", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
+    setCreateForm({ name: "", address: "", phone: "", type: "retail", classification: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
     setCreateErrors({});
   };
 
@@ -146,6 +170,9 @@ export default function BranchesPage() {
         name: createForm.name.trim(),
         address: createForm.address.trim(),
         type: createForm.type,
+        classification: createForm.classification !== "none"
+          ? (createForm.classification as "premium" | "aclass" | "bnc" | "outlet")
+          : undefined,
         phone: createForm.phone.trim() ? createForm.phone.trim() : undefined,
         latitude: createForm.latitude ? parseFloat(createForm.latitude) : undefined,
         longitude: createForm.longitude ? parseFloat(createForm.longitude) : undefined,
@@ -168,6 +195,7 @@ export default function BranchesPage() {
       address: branch.address,
       phone: branch.phone ?? "",
       type: branch.type ?? "retail",
+      classification: branch.classification ?? "none",
       latitude: branch.latitude?.toString() ?? "",
       longitude: branch.longitude?.toString() ?? "",
       timezone: branch.configuration?.timezone ?? "none",
@@ -215,6 +243,9 @@ export default function BranchesPage() {
         name: editForm.name.trim(),
         address: editForm.address.trim(),
         type: editForm.type,
+        classification: editForm.classification !== "none"
+          ? (editForm.classification as "premium" | "aclass" | "bnc" | "outlet")
+          : undefined,
         phone: editForm.phone.trim(),
         latitude: editForm.latitude ? parseFloat(editForm.latitude) : undefined,
         longitude: editForm.longitude ? parseFloat(editForm.longitude) : undefined,
@@ -307,6 +338,7 @@ export default function BranchesPage() {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Type</TableHead>
+              <TableHead>Class</TableHead>
               <TableHead>Address</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Hours</TableHead>
@@ -328,6 +360,15 @@ export default function BranchesPage() {
                     <Badge variant={branch.type === "warehouse" ? "secondary" : "outline"}>
                       {branch.type === "warehouse" ? "Warehouse" : "Retail"}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {branch.classification ? (
+                      <Badge variant="secondary" className={CLASSIFICATION_COLORS[branch.classification] ?? ""}>
+                        {CLASSIFICATION_LABELS[branch.classification] ?? branch.classification}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell>{branch.address}</TableCell>
                   <TableCell className="text-muted-foreground">
@@ -381,7 +422,7 @@ export default function BranchesPage() {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center text-muted-foreground py-8"
                 >
                   {searchQuery || statusFilter !== "all"
@@ -466,6 +507,29 @@ export default function BranchesPage() {
                 </SelectContent>
               </Select>
             </div>
+            {createForm.type === "retail" && (
+              <div className="space-y-2">
+                <Label htmlFor="create-classification">Branch Classification</Label>
+                <Select
+                  value={createForm.classification}
+                  onValueChange={(value) => updateCreateField("classification", value)}
+                >
+                  <SelectTrigger id="create-classification">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLASSIFICATION_OPTIONS.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Determines pricing tier and promotion eligibility
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="create-phone">Phone</Label>
               <Input
@@ -612,6 +676,29 @@ export default function BranchesPage() {
                 </SelectContent>
               </Select>
             </div>
+            {editForm.type === "retail" && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-classification">Branch Classification</Label>
+                <Select
+                  value={editForm.classification}
+                  onValueChange={(value) => updateEditField("classification", value)}
+                >
+                  <SelectTrigger id="edit-classification">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLASSIFICATION_OPTIONS.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Determines pricing tier and promotion eligibility
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="edit-phone">Phone</Label>
               <Input

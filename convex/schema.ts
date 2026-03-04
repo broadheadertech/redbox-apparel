@@ -31,6 +31,9 @@ export default defineSchema({
     address: v.string(),
     isActive: v.boolean(),
     type: v.optional(v.union(v.literal("retail"), v.literal("warehouse"))),
+    classification: v.optional(
+      v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
+    ),
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
@@ -462,6 +465,9 @@ export default defineSchema({
     tieredDiscountCentavos: v.optional(v.number()),
     // scoping
     branchIds: v.array(v.id("branches")),
+    branchClassifications: v.optional(
+      v.array(v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet")))
+    ),
     brandIds: v.array(v.id("brands")),
     categoryIds: v.array(v.id("categories")),
     variantIds: v.array(v.id("variants")),

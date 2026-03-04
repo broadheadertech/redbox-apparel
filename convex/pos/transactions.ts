@@ -169,11 +169,21 @@ export const createTransaction = mutation({
         });
       }
 
-      if (promo.branchIds.length > 0 && !promo.branchIds.includes(branchId)) {
-        throw new ConvexError({
-          code: "INVALID_PAYMENT",
-          message: "Promotion not valid for this branch",
-        });
+      // Branch scope: classification OR specific branch IDs
+      const currentBranch = await ctx.db.get(branchId);
+      const hasClassFilter = promo.branchClassifications && promo.branchClassifications.length > 0;
+      const hasBranchIdFilter = promo.branchIds.length > 0;
+      if (hasClassFilter || hasBranchIdFilter) {
+        const matchesClass = hasClassFilter && currentBranch?.classification
+          ? promo.branchClassifications!.includes(currentBranch.classification)
+          : false;
+        const matchesBranchId = hasBranchIdFilter && promo.branchIds.includes(branchId);
+        if (!matchesClass && !matchesBranchId) {
+          throw new ConvexError({
+            code: "INVALID_PAYMENT",
+            message: "Promotion not valid for this branch",
+          });
+        }
       }
 
       // Enrich cart items with brand/category for product scope filtering

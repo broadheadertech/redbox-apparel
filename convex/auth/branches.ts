@@ -40,6 +40,9 @@ export const createBranch = mutation({
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
     type: v.optional(v.union(v.literal("retail"), v.literal("warehouse"))),
+    classification: v.optional(
+      v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
+    ),
     configuration: v.optional(
       v.object({
         timezone: v.optional(v.string()),
@@ -74,6 +77,7 @@ export const createBranch = mutation({
         phone: args.phone,
         latitude: args.latitude,
         longitude: args.longitude,
+        classification: args.classification,
         configuration: args.configuration,
       },
     });
@@ -91,6 +95,9 @@ export const updateBranch = mutation({
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
     type: v.optional(v.union(v.literal("retail"), v.literal("warehouse"))),
+    classification: v.optional(
+      v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
+    ),
     configuration: v.optional(
       v.object({
         timezone: v.optional(v.string()),

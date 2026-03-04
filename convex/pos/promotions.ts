@@ -16,6 +16,7 @@ export const getActivePromotions = query({
     const branchId = scope.branchId;
     if (!branchId) return [];
 
+    const branch = await ctx.db.get(branchId);
     const now = Date.now();
 
     const allActive = await ctx.db
@@ -27,7 +28,18 @@ export const getActivePromotions = query({
     const applicable = allActive.filter((promo) => {
       if (now < promo.startDate) return false;
       if (promo.endDate !== undefined && now > promo.endDate) return false;
-      if (promo.branchIds.length > 0 && !promo.branchIds.includes(branchId)) return false;
+
+      // Branch scope: classification OR specific branch IDs
+      const hasClassFilter = promo.branchClassifications && promo.branchClassifications.length > 0;
+      const hasBranchIdFilter = promo.branchIds.length > 0;
+      if (hasClassFilter || hasBranchIdFilter) {
+        const matchesClass = hasClassFilter && branch?.classification
+          ? promo.branchClassifications!.includes(branch.classification)
+          : false;
+        const matchesBranchId = hasBranchIdFilter && promo.branchIds.includes(branchId);
+        if (!matchesClass && !matchesBranchId) return false;
+      }
+
       return true;
     });
 
@@ -51,6 +63,7 @@ export const getActivePromotions = query({
       variantIds: p.variantIds.map(String),
       priority: p.priority,
       agingTiers: p.agingTiers ?? [],
+      branchClassifications: p.branchClassifications ?? [],
     }));
   },
 });

@@ -150,8 +150,9 @@ interface PromoForm {
   noExpiration: boolean;
   isActive: boolean;
   priority: string;
-  allBranches: boolean;
+  branchScopeMode: "all" | "byClassification" | "specific";
   branchIds: Id<"branches">[];
+  branchClassifications: ("premium" | "aclass" | "bnc" | "outlet")[];
   allProducts: boolean;
   brandIds: Id<"brands">[];
   allStock: boolean;
@@ -175,8 +176,9 @@ function emptyForm(): PromoForm {
     noExpiration: false,
     isActive: true,
     priority: "0",
-    allBranches: true,
+    branchScopeMode: "all",
     branchIds: [],
+    branchClassifications: [],
     allProducts: true,
     brandIds: [],
     allStock: true,
@@ -243,16 +245,25 @@ export default function PromotionsPage() {
 
   function scopeSummary(promo: {
     branchIds: Id<"branches">[];
+    branchClassifications?: string[];
     brandIds: Id<"brands">[];
     agingTiers?: string[];
   }): string {
     const parts: string[] = [];
-    if (promo.branchIds.length === 0) {
+    const hasClassifications = promo.branchClassifications && promo.branchClassifications.length > 0;
+    const hasBranchIds = promo.branchIds.length > 0;
+    if (!hasClassifications && !hasBranchIds) {
       parts.push("All branches");
     } else {
-      parts.push(
-        `${promo.branchIds.length} branch${promo.branchIds.length !== 1 ? "es" : ""}`
-      );
+      const branchParts: string[] = [];
+      if (hasClassifications) {
+        const classLabels: Record<string, string> = { premium: "Premium", aclass: "A-Class", bnc: "BNC", outlet: "Outlet" };
+        branchParts.push(promo.branchClassifications!.map((c) => classLabels[c] ?? c).join(", "));
+      }
+      if (hasBranchIds) {
+        branchParts.push(`${promo.branchIds.length} branch${promo.branchIds.length !== 1 ? "es" : ""}`);
+      }
+      parts.push(branchParts.join(" + "));
     }
     if (promo.brandIds.length === 0) {
       parts.push("All products");
@@ -300,8 +311,14 @@ export default function PromotionsPage() {
       noExpiration: promo.endDate === undefined,
       isActive: promo.isActive,
       priority: promo.priority.toString(),
-      allBranches: promo.branchIds.length === 0,
+      branchScopeMode:
+        (promo.branchClassifications && promo.branchClassifications.length > 0)
+          ? "byClassification"
+          : promo.branchIds.length > 0
+            ? "specific"
+            : "all",
       branchIds: promo.branchIds,
+      branchClassifications: (promo.branchClassifications ?? []) as ("premium" | "aclass" | "bnc" | "outlet")[],
       allProducts: promo.brandIds.length === 0,
       brandIds: promo.brandIds,
       allStock: !promo.agingTiers || promo.agingTiers.length === 0,
@@ -351,7 +368,8 @@ export default function PromotionsPage() {
         form.promoType === "tiered" && form.tieredDiscountCentavos
           ? parseInt(form.tieredDiscountCentavos, 10)
           : undefined,
-      branchIds: form.allBranches ? [] : form.branchIds,
+      branchIds: form.branchScopeMode === "specific" ? form.branchIds : [],
+      branchClassifications: form.branchScopeMode === "byClassification" ? form.branchClassifications : undefined,
       brandIds: form.allProducts ? [] : form.brandIds,
       categoryIds: [] as Id<"categories">[],
       variantIds: [] as Id<"variants">[],
@@ -858,19 +876,69 @@ export default function PromotionsPage() {
             {/* Scope: Branches */}
             <div className="space-y-3">
               <Label>Branch Scope</Label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.allBranches}
-                  onChange={(e) => {
-                    updateField("allBranches", e.target.checked);
-                    if (e.target.checked) updateField("branchIds", []);
-                  }}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                All Branches
-              </label>
-              {!form.allBranches && (
+              <div className="space-y-2">
+                {([
+                  { value: "all" as const, label: "All Branches" },
+                  { value: "byClassification" as const, label: "By Classification" },
+                  { value: "specific" as const, label: "Specific Branches" },
+                ]).map((option) => (
+                  <label key={option.value} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="branchScopeMode"
+                      value={option.value}
+                      checked={form.branchScopeMode === option.value}
+                      onChange={() => {
+                        updateField("branchScopeMode", option.value);
+                        if (option.value === "all") {
+                          updateField("branchIds", []);
+                          updateField("branchClassifications", []);
+                        }
+                      }}
+                      className="h-4 w-4"
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+
+              {form.branchScopeMode === "byClassification" && (
+                <div className="border rounded-md p-3 space-y-1">
+                  {([
+                    { value: "premium" as const, label: "Premium", color: "text-purple-700" },
+                    { value: "aclass" as const, label: "A-Class", color: "text-blue-700" },
+                    { value: "bnc" as const, label: "BNC", color: "text-green-700" },
+                    { value: "outlet" as const, label: "Outlet", color: "text-amber-700" },
+                  ]).map((cls) => (
+                    <label
+                      key={cls.value}
+                      className={`flex items-center gap-2 text-sm cursor-pointer py-0.5 ${cls.color}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.branchClassifications.includes(cls.value)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            updateField("branchClassifications", [...form.branchClassifications, cls.value]);
+                          } else {
+                            updateField(
+                              "branchClassifications",
+                              form.branchClassifications.filter((c) => c !== cls.value)
+                            );
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      {cls.label}
+                    </label>
+                  ))}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Promotion applies to all branches with the selected classification(s).
+                  </p>
+                </div>
+              )}
+
+              {form.branchScopeMode === "specific" && (
                 <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-1">
                   {activeBranches.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
@@ -903,6 +971,11 @@ export default function PromotionsPage() {
                           className="h-4 w-4 rounded border-gray-300"
                         />
                         {branch.name}
+                        {branch.classification && (
+                          <Badge variant="secondary" className="text-xs ml-1">
+                            {branch.classification === "aclass" ? "A-Class" : branch.classification.charAt(0).toUpperCase() + branch.classification.slice(1)}
+                          </Badge>
+                        )}
                       </label>
                     ))
                   )}

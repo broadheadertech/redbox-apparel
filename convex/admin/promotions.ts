@@ -42,6 +42,9 @@ const commonArgs = {
   minSpendCentavos: v.optional(v.number()),
   tieredDiscountCentavos: v.optional(v.number()),
   branchIds: v.array(v.id("branches")),
+  branchClassifications: v.optional(
+    v.array(v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet")))
+  ),
   brandIds: v.array(v.id("brands")),
   categoryIds: v.array(v.id("categories")),
   variantIds: v.array(v.id("variants")),
