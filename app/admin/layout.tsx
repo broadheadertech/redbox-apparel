@@ -15,6 +15,7 @@ import {
   Database,
   LayoutDashboard,
   BarChart3,
+  LineChart,
   ArrowLeftRight,
   ClipboardList,
   FileText,
@@ -47,6 +48,7 @@ const adminNavItems: NavItem[] = [
 const managementNavItems: NavItem[] = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin"] },
   { href: "/admin/reports", label: "Reports", icon: BarChart3, roles: ["admin"] },
+  { href: "/admin/analytics", label: "Analytics", icon: LineChart, roles: ["admin"] },
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
   { href: "/admin/invoices", label: "Invoices", icon: FileText, roles: ["admin"] },
   { href: "/admin/promotions", label: "Promotions", icon: Tag, roles: ["admin"] },
