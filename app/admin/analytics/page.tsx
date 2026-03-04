@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
@@ -91,6 +91,29 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
   );
 }
 
+function SeverityBadge({ severity }: { severity: "critical" | "warning" | "info" }) {
+  const colors: Record<string, string> = {
+    critical: "bg-red-50 text-red-700 border-red-200",
+    warning: "bg-amber-50 text-amber-700 border-amber-200",
+    info: "bg-blue-50 text-blue-600 border-blue-200",
+  };
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${colors[severity]}`}
+    >
+      {severity.toUpperCase()}
+    </span>
+  );
+}
+
+const CATEGORY_ICONS: Record<string, string> = {
+  revenue: "\u{1F4B0}",
+  stock: "\u{1F4E6}",
+  velocity: "\u{26A1}",
+  transfer: "\u{1F69A}",
+  stockout: "\u{1F534}",
+};
+
 // ─── Payment method colors ────────────────────────────────────────────────────
 
 const PAYMENT_COLORS: Record<string, string> = {
@@ -150,7 +173,7 @@ const ANALYTICS_TABS: { value: AnalyticsTab; label: string; description: string 
   { value: "descriptive", label: "Descriptive", description: "What happened" },
   { value: "diagnostic", label: "Diagnostic", description: "Why it happened" },
   { value: "predictive", label: "Predictive", description: "What will happen" },
-  { value: "prescriptive", label: "Prescriptive", description: "Key insights" },
+  { value: "prescriptive", label: "Prescriptive", description: "Smart alerts & intelligence" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -209,57 +232,27 @@ export default function HQAnalyticsPage() {
     activeTab === "predictive" ? { startMs, endMs } : "skip"
   );
 
-  // Prescriptive
-  const insightsSnapshot = useQuery(
-    api.dashboards.hqDdpAnalytics.getInsightsSnapshot,
+  // Prescriptive — Smart Alerts & Cross-Branch Intelligence
+  const smartAlerts = useQuery(
+    api.dashboards.hqIntelligence.getSmartAlerts,
     activeTab === "prescriptive" ? { startMs, endMs } : "skip"
   );
-  const [insightsText, setInsightsText] = useState("");
-  const [insightsLoading, setInsightsLoading] = useState(false);
-  const [insightsError, setInsightsError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const generateInsights = useCallback(async () => {
-    if (!insightsSnapshot) return;
-    setInsightsText("");
-    setInsightsError(null);
-    setInsightsLoading(true);
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const res = await fetch("/api/analytics/insights", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(insightsSnapshot),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Request failed" }));
-        throw new Error(data.error ?? `HTTP ${res.status}`);
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response stream");
-
-      const decoder = new TextDecoder();
-      let accumulated = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        accumulated += decoder.decode(value, { stream: true });
-        setInsightsText(accumulated);
-      }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") return;
-      setInsightsError(err instanceof Error ? err.message : "Failed to generate insights");
-    } finally {
-      setInsightsLoading(false);
-    }
-  }, [insightsSnapshot]);
+  const branchRanking = useQuery(
+    api.dashboards.hqIntelligence.getBranchPerformanceRanking,
+    activeTab === "prescriptive" ? { startMs, endMs } : "skip"
+  );
+  const stockMatrix = useQuery(
+    api.dashboards.hqIntelligence.getStockDistributionMatrix,
+    activeTab === "prescriptive" ? { startMs, endMs } : "skip"
+  );
+  const transferOpps = useQuery(
+    api.dashboards.hqIntelligence.getTransferOpportunities,
+    activeTab === "prescriptive" ? {} : "skip"
+  );
+  const fulfillmentComparison = useQuery(
+    api.dashboards.hqIntelligence.getFulfillmentSpeedComparison,
+    activeTab === "prescriptive" ? {} : "skip"
+  );
 
   const todayLabel = new Date().toLocaleDateString("en-PH", {
     timeZone: "Asia/Manila",
@@ -816,127 +809,315 @@ export default function HQAnalyticsPage() {
 
       {/* ═══ PRESCRIPTIVE TAB ═════════════════════════════════════════════ */}
       {activeTab === "prescriptive" && (
-        <div className="space-y-6">
-          <div className="rounded-lg border p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold">AI-Generated Insights</h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Powered by Google Gemini &middot; Based on your {periodLabel.toLowerCase()} analytics data
-                  {insightsSnapshot ? ` across ${insightsSnapshot.sales.branchCount} retail branches` : ""}
-                </p>
-              </div>
-              {insightsText && !insightsLoading && (
-                <button
-                  onClick={generateInsights}
-                  className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
-                >
-                  Regenerate
-                </button>
-              )}
-            </div>
+        <div className="space-y-8">
+          {/* ── SMART ALERTS ─────────────────────────────────────────────── */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              Smart Alerts
+            </h3>
 
-            {/* Not yet generated */}
-            {!insightsText && !insightsLoading && !insightsError && (
-              <div className="flex flex-col items-center justify-center py-8 space-y-4">
-                {insightsSnapshot === undefined ? (
-                  <Skeleton className="h-10 w-48" />
-                ) : (
-                  <>
-                    <p className="text-sm text-muted-foreground text-center max-w-md">
-                      AI will analyze your sales, inventory, demand, and operational data to surface
-                      notable patterns and anomalies.
+            {smartAlerts === undefined ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-4">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-20" />
+                  ))}
+                </div>
+                <Skeleton className="h-32" />
+              </div>
+            ) : !smartAlerts || smartAlerts.length === 0 ? (
+              <div className="rounded-lg border p-8 text-center">
+                <p className="text-sm text-muted-foreground">No alerts detected for this period</p>
+                <p className="text-xs text-muted-foreground mt-1">All systems operating normally</p>
+              </div>
+            ) : (
+              <>
+                {/* Alert summary cards */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="rounded-lg border bg-card p-4 space-y-1">
+                    <p className="text-sm text-muted-foreground">Critical</p>
+                    <p className="text-2xl font-bold text-red-600">
+                      {smartAlerts.filter((a) => a.severity === "critical").length}
                     </p>
-                    <button
-                      onClick={generateInsights}
-                      disabled={!insightsSnapshot}
-                      className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  </div>
+                  <div className="rounded-lg border bg-card p-4 space-y-1">
+                    <p className="text-sm text-muted-foreground">Warnings</p>
+                    <p className="text-2xl font-bold text-amber-600">
+                      {smartAlerts.filter((a) => a.severity === "warning").length}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-card p-4 space-y-1">
+                    <p className="text-sm text-muted-foreground">Info</p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {smartAlerts.filter((a) => a.severity === "info").length}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Alert list */}
+                <div className="space-y-2">
+                  {smartAlerts.map((alert) => (
+                    <div
+                      key={alert.id}
+                      className={cn(
+                        "rounded-lg border p-4 flex items-start gap-3",
+                        alert.severity === "critical" && "border-red-200 bg-red-50/50",
+                        alert.severity === "warning" && "border-amber-200 bg-amber-50/50",
+                        alert.severity === "info" && "border-blue-200 bg-blue-50/50"
+                      )}
                     >
-                      Generate Insights
-                    </button>
-                    <p className="text-xs text-muted-foreground">
-                      Observations only — not financial or business advice
-                    </p>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Loading */}
-            {insightsLoading && !insightsText && (
-              <div className="flex items-center gap-2 py-8 justify-center">
-                <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
-                <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
-                <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
-                <span className="text-sm text-muted-foreground ml-2">Analyzing data...</span>
-              </div>
-            )}
-
-            {/* Error */}
-            {insightsError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-4 space-y-2">
-                <p className="text-sm text-red-800">{insightsError}</p>
-                <button
-                  onClick={generateInsights}
-                  className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
-                >
-                  Try Again
-                </button>
-              </div>
-            )}
-
-            {/* Streamed insights */}
-            {insightsText && (
-              <div className="prose prose-sm max-w-none">
-                {insightsText.split("\n").map((line, i) => {
-                  const trimmed = line.trim();
-                  if (!trimmed) return <div key={i} className="h-2" />;
-
-                  // Bold headers like **Revenue**
-                  if (/^\*\*(.+)\*\*$/.test(trimmed)) {
-                    const header = trimmed.replace(/\*\*/g, "");
-                    return (
-                      <h4 key={i} className="text-sm font-semibold mt-4 mb-1 text-foreground">
-                        {header}
-                      </h4>
-                    );
-                  }
-
-                  // Bullet points
-                  if (/^[-•*]\s/.test(trimmed)) {
-                    const text = trimmed.replace(/^[-•*]\s+/, "");
-                    return (
-                      <div key={i} className="flex items-start gap-2 text-sm text-muted-foreground py-0.5">
-                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                        <span dangerouslySetInnerHTML={{
-                          __html: text
-                            .replace(/\*\*(.+?)\*\*/g, "<strong class='text-foreground'>$1</strong>")
-                            .replace(/`(.+?)`/g, "<code class='text-xs bg-muted px-1 py-0.5 rounded'>$1</code>"),
-                        }} />
+                      <span className="text-lg shrink-0" role="img">
+                        {CATEGORY_ICONS[alert.category] ?? ""}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <SeverityBadge severity={alert.severity} />
+                          <span className="text-sm font-semibold">{alert.title}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">{alert.description}</p>
+                        {alert.affectedBranches.length > 0 && (
+                          <div className="flex gap-1 mt-2 flex-wrap">
+                            {alert.affectedBranches.map((b) => (
+                              <span
+                                key={b}
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-muted text-muted-foreground"
+                              >
+                                {b}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    );
-                  }
-
-                  // Regular text
-                  return (
-                    <p key={i} className="text-sm text-muted-foreground" dangerouslySetInnerHTML={{
-                      __html: trimmed
-                        .replace(/\*\*(.+?)\*\*/g, "<strong class='text-foreground'>$1</strong>")
-                        .replace(/`(.+?)`/g, "<code class='text-xs bg-muted px-1 py-0.5 rounded'>$1</code>"),
-                    }} />
-                  );
-                })}
-                {insightsLoading && (
-                  <span className="inline-block h-4 w-1 bg-primary animate-pulse ml-0.5" />
-                )}
-              </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 
-          <p className="text-xs text-muted-foreground text-center">
-            These are AI-generated observations based on your analytics data.
-            They are not financial or business advice.
-          </p>
+          {/* ── CROSS-BRANCH INTELLIGENCE ─────────────────────────────── */}
+          <div className="space-y-6">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              Cross-Branch Intelligence
+            </h3>
+
+            {/* Branch Ranking + Fulfillment Speed side by side */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Branch Performance Ranking */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold">Branch Performance Ranking ({periodLabel})</h4>
+                {branchRanking === undefined ? (
+                  <Skeleton className="h-48" />
+                ) : !branchRanking || branchRanking.length === 0 ? (
+                  <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                    No branch data available
+                  </div>
+                ) : (
+                  <div className="rounded-lg border overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-muted/50 border-b">
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">Branch</th>
+                          <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                          <th className="text-right px-3 py-2 font-medium text-muted-foreground">Txns</th>
+                          <th className="text-right px-3 py-2 font-medium text-muted-foreground">Avg Ticket</th>
+                          <th className="text-center px-3 py-2 font-medium text-muted-foreground">Trend</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {branchRanking.map((b) => (
+                          <tr key={b.branchId} className="border-b last:border-0">
+                            <td className="px-3 py-2 text-muted-foreground font-medium">{b.rank}</td>
+                            <td className="px-3 py-2 font-medium">{b.branchName}</td>
+                            <td className="px-3 py-2 text-right">{formatCentavos(b.revenueCentavos)}</td>
+                            <td className="px-3 py-2 text-right">{b.transactionCount}</td>
+                            <td className="px-3 py-2 text-right">{formatCentavos(b.avgTicketCentavos)}</td>
+                            <td className="px-3 py-2 text-center">
+                              <TrendArrow
+                                current={b.revenueCentavos}
+                                previous={b.previousRevenueCentavos}
+                                higherIsBetter
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Fulfillment Speed Comparison */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold">Fulfillment Speed by Branch (30 days)</h4>
+                {fulfillmentComparison === undefined ? (
+                  <Skeleton className="h-48" />
+                ) : !fulfillmentComparison || fulfillmentComparison.branches.length === 0 ? (
+                  <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                    No transfer data available
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Overall avg: <span className="font-medium text-foreground">{fulfillmentComparison.overallAvgHours}h</span>
+                    </p>
+                    <div className="rounded-lg border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/50 border-b">
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Branch</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Avg Hours</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Completed</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Pending</th>
+                            <th className="text-center px-3 py-2 font-medium text-muted-foreground">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fulfillmentComparison.branches.map((b) => (
+                            <tr key={b.branchId} className="border-b last:border-0">
+                              <td className="px-3 py-2 font-medium">{b.branchName}</td>
+                              <td className="px-3 py-2 text-right">
+                                <span className={b.isOutlier ? "text-red-600 font-medium" : ""}>
+                                  {b.avgFulfillmentHours > 0 ? `${b.avgFulfillmentHours}h` : "N/A"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right text-green-600">{b.completedCount}</td>
+                              <td className="px-3 py-2 text-right text-amber-600">{b.pendingCount}</td>
+                              <td className="px-3 py-2 text-center">
+                                {b.isOutlier ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+                                    SLOW
+                                  </span>
+                                ) : b.completedCount > 0 ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                                    OK
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Stock Distribution Matrix */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold">Stock Distribution — Top Selling Products ({periodLabel})</h4>
+              <p className="text-xs text-muted-foreground">
+                Current stock levels across branches for your best-selling products. Red cells indicate out-of-stock imbalances.
+              </p>
+              {stockMatrix === undefined ? (
+                <Skeleton className="h-48" />
+              ) : !stockMatrix || stockMatrix.products.length === 0 ? (
+                <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                  No sales data for this period
+                </div>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-muted/50 border-b">
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground sticky left-0 bg-muted/50 min-w-[180px]">
+                            Product
+                          </th>
+                          <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sold</th>
+                          {stockMatrix.branches.map((b) => (
+                            <th key={b.branchId} className="text-center px-3 py-2 font-medium text-muted-foreground min-w-[80px]">
+                              {b.branchName}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockMatrix.products.map((p) => (
+                          <tr key={p.variantId} className="border-b last:border-0">
+                            <td className="px-3 py-2 sticky left-0 bg-white">
+                              <p className="font-medium">{p.styleName}</p>
+                              <p className="text-muted-foreground">{p.size} / {p.color}</p>
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium">{p.totalSold}</td>
+                            {p.stockByBranch.map((sb) => (
+                              <td
+                                key={sb.branchId}
+                                className={cn(
+                                  "px-3 py-2 text-center font-medium",
+                                  sb.isImbalanced && "bg-red-100 text-red-700",
+                                  !sb.isImbalanced && sb.quantity <= 0 && "text-muted-foreground",
+                                  !sb.isImbalanced && sb.quantity > 0 && sb.quantity <= 5 && "text-amber-600",
+                                  !sb.isImbalanced && sb.quantity > 5 && "text-green-600"
+                                )}
+                              >
+                                {sb.quantity}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Transfer Opportunities */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold">Transfer Opportunities</h4>
+              <p className="text-xs text-muted-foreground">
+                Branches with excess stock that could fulfill restock needs at other branches
+              </p>
+              {transferOpps === undefined ? (
+                <Skeleton className="h-40" />
+              ) : !transferOpps || transferOpps.length === 0 ? (
+                <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                  No transfer opportunities detected
+                </div>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-muted/50 border-b">
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">From</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">To</th>
+                          <th className="text-right px-3 py-2 font-medium text-muted-foreground">Suggested Qty</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">Rationale</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {transferOpps.map((opp, i) => (
+                          <tr key={i} className="border-b last:border-0">
+                            <td className="px-3 py-2">
+                              <p className="font-medium">{opp.styleName}</p>
+                              <p className="text-muted-foreground">{opp.size} / {opp.color}</p>
+                            </td>
+                            <td className="px-3 py-2">
+                              <p className="font-medium">{opp.fromBranch.branchName}</p>
+                              <p className="text-muted-foreground">{opp.fromBranch.excessQuantity} in stock</p>
+                            </td>
+                            <td className="px-3 py-2">
+                              <p className="font-medium">{opp.toBranch.branchName}</p>
+                              <p className="text-red-600">{opp.toBranch.daysUntilStockout.toFixed(1)}d left</p>
+                            </td>
+                            <td className="px-3 py-2 text-right font-bold text-primary">{opp.suggestedTransferQty}</td>
+                            <td className="px-3 py-2 text-muted-foreground max-w-[200px]">{opp.rationale}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

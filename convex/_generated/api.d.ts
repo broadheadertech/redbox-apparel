@@ -39,6 +39,7 @@ import type * as dashboards_demandIntelligence from "../dashboards/demandIntelli
 import type * as dashboards_hqAnalytics from "../dashboards/hqAnalytics.js";
 import type * as dashboards_hqDashboard from "../dashboards/hqDashboard.js";
 import type * as dashboards_hqDdpAnalytics from "../dashboards/hqDdpAnalytics.js";
+import type * as dashboards_hqIntelligence from "../dashboards/hqIntelligence.js";
 import type * as dashboards_inventoryAging from "../dashboards/inventoryAging.js";
 import type * as dashboards_productMovers from "../dashboards/productMovers.js";
 import type * as demand_entries from "../demand/entries.js";
@@ -106,6 +107,7 @@ declare const fullApi: ApiFromModules<{
   "dashboards/hqAnalytics": typeof dashboards_hqAnalytics;
   "dashboards/hqDashboard": typeof dashboards_hqDashboard;
   "dashboards/hqDdpAnalytics": typeof dashboards_hqDdpAnalytics;
+  "dashboards/hqIntelligence": typeof dashboards_hqIntelligence;
   "dashboards/inventoryAging": typeof dashboards_inventoryAging;
   "dashboards/productMovers": typeof dashboards_productMovers;
   "demand/entries": typeof demand_entries;
