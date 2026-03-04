@@ -491,11 +491,12 @@ export default function BranchAnalyticsPage() {
             {/* Fast Movers */}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-green-700">Fast Movers</h3>
+              <p className="text-xs text-muted-foreground">Products selling consistently across multiple days</p>
               {velocity === undefined ? (
                 <Skeleton className="h-40" />
               ) : !velocity || velocity.fastMovers.length === 0 ? (
                 <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                  No sales data
+                  No consistent fast-selling products detected
                 </div>
               ) : (
                 <div className="rounded-lg border overflow-hidden">
@@ -504,6 +505,7 @@ export default function BranchAnalyticsPage() {
                       <tr className="bg-muted/50 border-b">
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
                         <th className="text-right px-3 py-2 font-medium text-muted-foreground">Avg/Day</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sell Days</th>
                         <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
                       </tr>
                     </thead>
@@ -515,6 +517,7 @@ export default function BranchAnalyticsPage() {
                             <p className="text-muted-foreground">{item.size} / {item.color}</p>
                           </td>
                           <td className="px-3 py-2 text-right font-medium text-green-600">{item.avgDaily}</td>
+                          <td className="px-3 py-2 text-right text-muted-foreground">{item.sellDays}d</td>
                           <td className="px-3 py-2 text-right">{item.currentStock}</td>
                         </tr>
                       ))}
@@ -540,6 +543,7 @@ export default function BranchAnalyticsPage() {
                       <tr className="bg-muted/50 border-b">
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
                         <th className="text-right px-3 py-2 font-medium text-muted-foreground">Avg/Day</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sell Days</th>
                         <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
                       </tr>
                     </thead>
@@ -551,6 +555,7 @@ export default function BranchAnalyticsPage() {
                             <p className="text-muted-foreground">{item.size} / {item.color}</p>
                           </td>
                           <td className="px-3 py-2 text-right font-medium text-amber-600">{item.avgDaily}</td>
+                          <td className="px-3 py-2 text-right text-muted-foreground">{item.sellDays}d</td>
                           <td className="px-3 py-2 text-right">{item.currentStock}</td>
                         </tr>
                       ))}

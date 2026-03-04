@@ -270,7 +270,9 @@ export const getHQProductVelocity = query({
     ).flat();
 
     const variantSales = new Map<string, number>();
+    const variantSellDays = new Map<string, Set<number>>();
     for (const txn of allTxns) {
+      const txnDay = Math.floor((txn.createdAt + PHT_OFFSET_MS) / DAY_MS);
       const items = await ctx.db
         .query("transactionItems")
         .withIndex("by_transaction", (q) => q.eq("transactionId", txn._id))
@@ -278,6 +280,8 @@ export const getHQProductVelocity = query({
       for (const item of items) {
         const key = item.variantId as string;
         variantSales.set(key, (variantSales.get(key) ?? 0) + item.quantity);
+        if (!variantSellDays.has(key)) variantSellDays.set(key, new Set());
+        variantSellDays.get(key)!.add(txnDay);
       }
     }
 
@@ -306,18 +310,23 @@ export const getHQProductVelocity = query({
         .map(([vid]) => vid),
     ]);
 
-    const entries: { variantId: string; totalSold: number; avgDaily: number; currentStock: number }[] = [];
+    const entries: { variantId: string; totalSold: number; avgDaily: number; sellDays: number; currentStock: number }[] = [];
     for (const vid of allVariantIds) {
       const totalSold = variantSales.get(vid) ?? 0;
       entries.push({
         variantId: vid,
         totalSold,
         avgDaily: Math.round((totalSold / durationDays) * 10) / 10,
+        sellDays: variantSellDays.get(vid)?.size ?? 0,
         currentStock: inventoryMap.get(vid) ?? 0,
       });
     }
 
-    const fastMovers = [...entries].sort((a, b) => b.avgDaily - a.avgDaily).slice(0, 5);
+    // Fast movers: must sell on ≥2 distinct days to filter out single-day spikes
+    const fastMovers = [...entries]
+      .filter((e) => e.sellDays >= 2)
+      .sort((a, b) => b.avgDaily - a.avgDaily)
+      .slice(0, 5);
     const slowMovers = entries
       .filter((e) => e.currentStock > 0)
       .sort((a, b) => a.avgDaily - b.avgDaily)
