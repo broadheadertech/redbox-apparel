@@ -674,3 +674,101 @@ export const getHQDemandForecast = query({
   },
 });
 
+// ─── Sales Forecast (monthly + yearly) ──────────────────────────────────────
+
+export const getHQSalesForecast = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const nowUtc = Date.now();
+    const nowPht = nowUtc + PHT_OFFSET_MS;
+    const nowDate = new Date(nowPht);
+
+    // Current month boundaries (PHT)
+    const curYear = nowDate.getUTCFullYear();
+    const curMonth = nowDate.getUTCMonth(); // 0-indexed
+    const monthStartPht = Date.UTC(curYear, curMonth, 1); // midnight PHT as UTC
+    const monthStartUtc = monthStartPht - PHT_OFFSET_MS;
+    const daysInMonth = new Date(curYear, curMonth + 1, 0).getDate();
+    const dayOfMonth = nowDate.getUTCDate();
+
+    // Last month boundaries
+    const lastMonthStartPht = Date.UTC(curYear, curMonth - 1, 1);
+    const lastMonthStartUtc = lastMonthStartPht - PHT_OFFSET_MS;
+    const daysInLastMonth = new Date(curYear, curMonth, 0).getDate();
+
+    // Current year boundaries (PHT)
+    const yearStartPht = Date.UTC(curYear, 0, 1);
+    const yearStartUtc = yearStartPht - PHT_OFFSET_MS;
+    const daysInYear = ((curYear % 4 === 0 && curYear % 100 !== 0) || curYear % 400 === 0) ? 366 : 365;
+    const dayOfYear = Math.floor((nowPht - yearStartPht) / DAY_MS) + 1;
+
+    // Last year boundaries
+    const lastYearStartPht = Date.UTC(curYear - 1, 0, 1);
+    const lastYearStartUtc = lastYearStartPht - PHT_OFFSET_MS;
+
+    // Fetch retail branches
+    const branches = await ctx.db
+      .query("branches")
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .collect();
+    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+
+    // Fetch all transactions from last year start to now
+    const allTxns = (
+      await Promise.all(
+        retailBranches.map((branch) =>
+          ctx.db
+            .query("transactions")
+            .withIndex("by_branch_date", (q) =>
+              q.eq("branchId", branch._id).gte("createdAt", lastYearStartUtc)
+            )
+            .collect()
+        )
+      )
+    ).flat();
+
+    // Bucketize
+    const thisMonthRev = allTxns
+      .filter((t) => t.createdAt >= monthStartUtc && t.createdAt <= nowUtc)
+      .reduce((s, t) => s + t.totalCentavos, 0);
+
+    const lastMonthRev = allTxns
+      .filter((t) => t.createdAt >= lastMonthStartUtc && t.createdAt < monthStartUtc)
+      .reduce((s, t) => s + t.totalCentavos, 0);
+
+    const thisYearRev = allTxns
+      .filter((t) => t.createdAt >= yearStartUtc && t.createdAt <= nowUtc)
+      .reduce((s, t) => s + t.totalCentavos, 0);
+
+    const lastYearRev = allTxns
+      .filter((t) => t.createdAt >= lastYearStartUtc && t.createdAt < yearStartUtc)
+      .reduce((s, t) => s + t.totalCentavos, 0);
+
+    const monthDaysElapsed = Math.max(1, dayOfMonth);
+    const yearDaysElapsed = Math.max(1, dayOfYear);
+
+    return {
+      monthly: {
+        currentRevenueCentavos: thisMonthRev,
+        daysElapsed: monthDaysElapsed,
+        totalDays: daysInMonth,
+        dailyAverageCentavos: Math.round(thisMonthRev / monthDaysElapsed),
+        projectedCentavos: Math.round((thisMonthRev / monthDaysElapsed) * daysInMonth),
+        lastPeriodCentavos: lastMonthRev,
+        lastPeriodDays: daysInLastMonth,
+      },
+      yearly: {
+        currentRevenueCentavos: thisYearRev,
+        daysElapsed: yearDaysElapsed,
+        totalDays: daysInYear,
+        dailyAverageCentavos: Math.round(thisYearRev / yearDaysElapsed),
+        projectedCentavos: Math.round((thisYearRev / yearDaysElapsed) * daysInYear),
+        lastPeriodCentavos: lastYearRev,
+      },
+      branchCount: retailBranches.length,
+    };
+  },
+});
+

@@ -604,10 +604,9 @@ export const seedVelocityData = action({
     branch: string;
     scenarios: Array<{ label: string; sku: string; totalSold: number; stock: number }>;
   }> => {
-    // 1. Verify admin
-    const user = await ctx.runQuery(
-      internal.catalog.bulkImport._verifyAdminRole
-    );
+    // 1. Find an admin user directly (no auth needed for CLI seeding)
+    const user = await ctx.runQuery(internal.seed._getAdminUser);
+    if (!user) throw new Error("No admin user found in DB. Run seedDatabase first.");
 
     console.log("=== Velocity Seed: Starting ===");
 
@@ -714,6 +713,14 @@ export const seedVelocityData = action({
 });
 
 /** Helper queries for velocity seeder */
+export const _getAdminUser = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const users = await ctx.db.query("users").collect();
+    return users.find((u) => u.role === "admin" && u.isActive) ?? null;
+  },
+});
+
 export const _getRetailBranches = internalQuery({
   args: {},
   handler: async (ctx) => {

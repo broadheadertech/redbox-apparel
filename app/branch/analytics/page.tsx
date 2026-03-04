@@ -227,6 +227,10 @@ export default function BranchAnalyticsPage() {
   );
 
   // Predictive
+  const salesForecast = useQuery(
+    api.dashboards.branchAnalytics.getSalesForecast,
+    activeTab === "predictive" ? {} : "skip"
+  );
   const restockSuggestions = useQuery(
     api.dashboards.branchAnalytics.getBranchRestockSuggestions,
     activeTab === "predictive" ? {} : "skip"
@@ -680,6 +684,78 @@ export default function BranchAnalyticsPage() {
       {/* ═══ PREDICTIVE TAB ═══════════════════════════════════════════════ */}
       {activeTab === "predictive" && (
         <div className="space-y-6">
+          {/* Sales Forecast (Monthly + Yearly) */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold">Sales Forecast</h3>
+            <p className="text-xs text-muted-foreground">Monthly and yearly projections based on daily average sales</p>
+            {salesForecast === undefined ? (
+              <Skeleton className="h-40" />
+            ) : !salesForecast ? (
+              <p className="text-sm text-muted-foreground">No data.</p>
+            ) : (
+              <div className="space-y-3">
+                {/* Monthly Forecast */}
+                <div className="rounded-lg border bg-card p-4">
+                  <p className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">Monthly Forecast</p>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-xs text-muted-foreground">This Month ({salesForecast.monthly.daysElapsed}/{salesForecast.monthly.totalDays}d)</p>
+                      <p className="text-lg font-bold">{formatCentavos(salesForecast.monthly.currentRevenueCentavos)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Daily Average</p>
+                      <p className="text-lg font-bold">{formatCentavos(salesForecast.monthly.dailyAverageCentavos)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Projected Month</p>
+                      <p className="text-lg font-bold text-primary">{formatCentavos(salesForecast.monthly.projectedCentavos)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Last Month Actual</p>
+                      <p className="text-lg font-bold">{formatCentavos(salesForecast.monthly.lastPeriodCentavos)}</p>
+                      {salesForecast.monthly.projectedCentavos > 0 && salesForecast.monthly.lastPeriodCentavos > 0 && (
+                        <TrendArrow
+                          current={salesForecast.monthly.projectedCentavos}
+                          previous={salesForecast.monthly.lastPeriodCentavos}
+                          higherIsBetter
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {/* Yearly Forecast */}
+                <div className="rounded-lg border bg-card p-4">
+                  <p className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">Yearly Forecast</p>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-xs text-muted-foreground">This Year ({salesForecast.yearly.daysElapsed}/{salesForecast.yearly.totalDays}d)</p>
+                      <p className="text-lg font-bold">{formatCentavos(salesForecast.yearly.currentRevenueCentavos)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Daily Average</p>
+                      <p className="text-lg font-bold">{formatCentavos(salesForecast.yearly.dailyAverageCentavos)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Projected Year</p>
+                      <p className="text-lg font-bold text-primary">{formatCentavos(salesForecast.yearly.projectedCentavos)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Last Year Actual</p>
+                      <p className="text-lg font-bold">{formatCentavos(salesForecast.yearly.lastPeriodCentavos)}</p>
+                      {salesForecast.yearly.projectedCentavos > 0 && salesForecast.yearly.lastPeriodCentavos > 0 && (
+                        <TrendArrow
+                          current={salesForecast.yearly.projectedCentavos}
+                          previous={salesForecast.yearly.lastPeriodCentavos}
+                          higherIsBetter
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Revenue Projection */}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">Revenue Projection</h3>
