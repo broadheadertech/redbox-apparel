@@ -1110,7 +1110,7 @@ export default function HQAnalyticsPage() {
                             </td>
                             <td className="px-3 py-2">
                               <p className="font-medium">{opp.toBranch.branchName}</p>
-                              <p className="text-red-600">{opp.toBranch.daysUntilStockout.toFixed(1)}d left</p>
+                              <p className="text-red-600">{Math.round(opp.toBranch.daysUntilStockout)}d left</p>
                             </td>
                             <td className="px-3 py-2 text-right font-bold text-primary">{opp.suggestedTransferQty}</td>
                             <td className="px-3 py-2 text-muted-foreground max-w-[200px]">{opp.rationale}</td>

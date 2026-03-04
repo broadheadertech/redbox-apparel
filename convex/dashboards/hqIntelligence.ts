@@ -270,8 +270,8 @@ export const getSmartAlerts = query({
           id: `vel-spike-${va.variantId}`,
           severity: "warning",
           category: "velocity",
-          title: `Velocity spike: ${name} selling ${va.ratio.toFixed(1)}x faster`,
-          description: `Current: ${va.curDaily.toFixed(1)}/day vs baseline: ${va.prevDaily.toFixed(1)}/day`,
+          title: `Velocity spike: ${name} selling ${Math.round(va.ratio)}x faster`,
+          description: `Current: ${Math.round(va.curDaily)}/day vs baseline: ${Math.round(va.prevDaily)}/day`,
           affectedBranches: [],
         });
       } else {
@@ -279,8 +279,8 @@ export const getSmartAlerts = query({
           id: `vel-drop-${va.variantId}`,
           severity: "warning",
           category: "velocity",
-          title: `Velocity drop: ${name} selling ${(1 / va.ratio).toFixed(1)}x slower`,
-          description: `Current: ${va.curDaily.toFixed(1)}/day vs baseline: ${va.prevDaily.toFixed(1)}/day`,
+          title: `Velocity drop: ${name} selling ${Math.round(1 / va.ratio)}x slower`,
+          description: `Current: ${Math.round(va.curDaily)}/day vs baseline: ${Math.round(va.prevDaily)}/day`,
           affectedBranches: [],
         });
       }
@@ -350,7 +350,7 @@ export const getSmartAlerts = query({
         severity: "critical",
         category: "stockout",
         title: `Critical: ${name} has <${Math.ceil(rs.daysUntilStockout)} days stock`,
-        description: `${rs.daysUntilStockout.toFixed(1)} days left at ${branchName}, velocity ${rs.avgDailyVelocity.toFixed(1)}/day`,
+        description: `${Math.round(rs.daysUntilStockout)} days left at ${branchName}, velocity ${Math.round(rs.avgDailyVelocity)}/day`,
         affectedBranches: [branchName],
       });
     }
@@ -599,7 +599,7 @@ export const getTransferOpportunities = query({
               suggestedQty: transferQty,
               excessQty: qty,
               daysUntilStockout: sug.daysUntilStockout,
-              rationale: `${branchNameMap.get(toBranchId) ?? "?"} needs stock (${sug.daysUntilStockout.toFixed(1)} days left), ${branchNameMap.get(fromBranchId) ?? "?"} has ${qty} units`,
+              rationale: `${branchNameMap.get(toBranchId) ?? "?"} needs stock (${Math.round(sug.daysUntilStockout)} days left), ${branchNameMap.get(fromBranchId) ?? "?"} has ${qty} units`,
             });
           }
         }
