@@ -465,9 +465,9 @@ export default defineSchema({
     brandIds: v.array(v.id("brands")),
     categoryIds: v.array(v.id("categories")),
     variantIds: v.array(v.id("variants")),
-    // date range
+    // date range (endDate optional = no expiration)
     startDate: v.number(),
-    endDate: v.number(),
+    endDate: v.optional(v.number()),
     // status
     isActive: v.boolean(),
     priority: v.number(),

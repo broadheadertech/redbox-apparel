@@ -23,9 +23,10 @@ export const getActivePromotions = query({
       .withIndex("by_isActive", (q) => q.eq("isActive", true))
       .collect();
 
-    // Filter: within date range AND applicable to this branch
+    // Filter: within date range (endDate optional = no expiration) AND applicable to this branch
     const applicable = allActive.filter((promo) => {
-      if (now < promo.startDate || now > promo.endDate) return false;
+      if (now < promo.startDate) return false;
+      if (promo.endDate !== undefined && now > promo.endDate) return false;
       if (promo.branchIds.length > 0 && !promo.branchIds.includes(branchId)) return false;
       return true;
     });

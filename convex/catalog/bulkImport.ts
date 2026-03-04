@@ -217,29 +217,23 @@ export const _createImportedVariant = internalMutation({
       });
     }
 
-    // Check SKU uniqueness
+    // Check SKU uniqueness — skip if duplicate
     const existingSku = await ctx.db
       .query("variants")
       .withIndex("by_sku", (q) => q.eq("sku", args.sku))
       .first();
     if (existingSku) {
-      throw new ConvexError({
-        code: "DUPLICATE_SKU",
-        message: `SKU "${args.sku}" is already in use`,
-      });
+      return { status: "skipped" as const, reason: `SKU "${args.sku}" already exists` };
     }
 
-    // Check barcode uniqueness if provided
+    // Check barcode uniqueness — skip if duplicate
     if (args.barcode && args.barcode.trim() !== "") {
       const existingBarcode = await ctx.db
         .query("variants")
         .withIndex("by_barcode", (q) => q.eq("barcode", args.barcode!))
         .first();
       if (existingBarcode) {
-        throw new ConvexError({
-          code: "DUPLICATE_BARCODE",
-          message: `Barcode "${args.barcode}" is already in use`,
-        });
+        return { status: "skipped" as const, reason: `Barcode "${args.barcode}" already exists` };
       }
     }
 
@@ -271,7 +265,7 @@ export const _createImportedVariant = internalMutation({
       },
     });
 
-    return variantId;
+    return { status: "created" as const, variantId };
   },
 });
 
@@ -313,11 +307,13 @@ export const bulkImportProducts = action({
     const styleCache = new Map<string, Id<"styles">>();
 
     let successCount = 0;
+    let skippedCount = 0;
     let failureCount = 0;
     let brandsCreated = 0;
     let categoriesCreated = 0;
     let stylesCreated = 0;
     const errors: Array<{ rowIndex: number; sku: string; error: string }> = [];
+    const skipped: Array<{ rowIndex: number; sku: string; reason: string }> = [];
 
     for (let i = 0; i < args.items.length; i++) {
       const row = args.items[i];
@@ -367,8 +363,8 @@ export const bulkImportProducts = action({
           if (styleResult.created) stylesCreated++;
         }
 
-        // 4. Create variant (always new)
-        await ctx.runMutation(
+        // 4. Create variant (skip if duplicate)
+        const variantResult = await ctx.runMutation(
           internal.catalog.bulkImport._createImportedVariant,
           {
             styleId,
@@ -382,7 +378,12 @@ export const bulkImportProducts = action({
           }
         );
 
-        successCount++;
+        if (variantResult.status === "skipped") {
+          skippedCount++;
+          skipped.push({ rowIndex: i, sku: row.sku, reason: variantResult.reason });
+        } else {
+          successCount++;
+        }
       } catch (error: unknown) {
         failureCount++;
         const message =
@@ -397,8 +398,10 @@ export const bulkImportProducts = action({
 
     return {
       successCount,
+      skippedCount,
       failureCount,
       errors,
+      skipped,
       brandsCreated,
       categoriesCreated,
       stylesCreated,

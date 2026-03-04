@@ -162,7 +162,7 @@ export const createTransaction = mutation({
       }
 
       const now = Date.now();
-      if (now < promo.startDate || now > promo.endDate) {
+      if (now < promo.startDate || (promo.endDate !== undefined && now > promo.endDate)) {
         throw new ConvexError({
           code: "INVALID_PAYMENT",
           message: "Promotion has expired or not yet started",

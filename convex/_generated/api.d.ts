@@ -49,6 +49,7 @@ import type * as inventory_stockLevels from "../inventory/stockLevels.js";
 import type * as invoices_internalInvoices from "../invoices/internalInvoices.js";
 import type * as logistics_assignments from "../logistics/assignments.js";
 import type * as logistics_deliveries from "../logistics/deliveries.js";
+import type * as migrations_backfillBatches from "../migrations/backfillBatches.js";
 import type * as pos_offlineSync from "../pos/offlineSync.js";
 import type * as pos_products from "../pos/products.js";
 import type * as pos_promotions from "../pos/promotions.js";
@@ -114,6 +115,7 @@ declare const fullApi: ApiFromModules<{
   "invoices/internalInvoices": typeof invoices_internalInvoices;
   "logistics/assignments": typeof logistics_assignments;
   "logistics/deliveries": typeof logistics_deliveries;
+  "migrations/backfillBatches": typeof migrations_backfillBatches;
   "pos/offlineSync": typeof pos_offlineSync;
   "pos/products": typeof pos_products;
   "pos/promotions": typeof pos_promotions;

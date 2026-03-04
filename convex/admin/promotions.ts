@@ -46,7 +46,7 @@ const commonArgs = {
   categoryIds: v.array(v.id("categories")),
   variantIds: v.array(v.id("variants")),
   startDate: v.number(),
-  endDate: v.number(),
+  endDate: v.optional(v.number()),
   isActive: v.boolean(),
   priority: v.number(),
 };
@@ -61,9 +61,9 @@ function validatePromoFields(args: {
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
   startDate: number;
-  endDate: number;
+  endDate?: number;
 }) {
-  if (args.startDate >= args.endDate) {
+  if (args.endDate !== undefined && args.startDate >= args.endDate) {
     throw new ConvexError("Start date must be before end date");
   }
 

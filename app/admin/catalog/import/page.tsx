@@ -86,10 +86,18 @@ interface ImportError {
   error: string;
 }
 
+interface ImportSkipped {
+  rowIndex: number;
+  sku: string;
+  reason: string;
+}
+
 interface BatchResult {
   successCount: number;
+  skippedCount: number;
   failureCount: number;
   errors: ImportError[];
+  skipped: ImportSkipped[];
   brandsCreated: number;
   categoriesCreated: number;
   stylesCreated: number;
@@ -114,8 +122,10 @@ export default function BulkImportPage() {
   // Results state
   const [results, setResults] = useState<{
     successCount: number;
+    skippedCount: number;
     failureCount: number;
     errors: ImportError[];
+    skipped: ImportSkipped[];
     brandsCreated: number;
     categoriesCreated: number;
     stylesCreated: number;
@@ -236,6 +246,7 @@ export default function BulkImportPage() {
     // Client-side validation
     const invalidRows: string[] = [];
     const seenSkus = new Set<string>();
+    const seenBarcodes = new Set<string>();
     items.forEach((item, i) => {
       if (!item.brand) invalidRows.push(`Row ${i + 1}: missing brand`);
       if (!item.category) invalidRows.push(`Row ${i + 1}: missing category`);
@@ -243,6 +254,10 @@ export default function BulkImportPage() {
       if (!item.sku) invalidRows.push(`Row ${i + 1}: missing sku`);
       else if (seenSkus.has(item.sku)) invalidRows.push(`Row ${i + 1}: duplicate SKU "${item.sku}"`);
       else seenSkus.add(item.sku);
+      if (item.barcode) {
+        if (seenBarcodes.has(item.barcode)) invalidRows.push(`Row ${i + 1}: duplicate barcode "${item.barcode}"`);
+        else seenBarcodes.add(item.barcode);
+      }
       if (!item.size) invalidRows.push(`Row ${i + 1}: missing size`);
       if (!item.color) invalidRows.push(`Row ${i + 1}: missing color`);
       if (isNaN(item.basePriceCentavos) || item.basePriceCentavos <= 0)
@@ -269,8 +284,10 @@ export default function BulkImportPage() {
     // Process batches sequentially
     const aggregated = {
       successCount: 0,
+      skippedCount: 0,
       failureCount: 0,
       errors: [] as ImportError[],
+      skipped: [] as ImportSkipped[],
       brandsCreated: 0,
       categoriesCreated: 0,
       stylesCreated: 0,
@@ -284,6 +301,7 @@ export default function BulkImportPage() {
         });
 
         aggregated.successCount += batchResult.successCount;
+        aggregated.skippedCount += batchResult.skippedCount;
         aggregated.failureCount += batchResult.failureCount;
         aggregated.brandsCreated += batchResult.brandsCreated;
         aggregated.categoriesCreated += batchResult.categoriesCreated;
@@ -297,15 +315,25 @@ export default function BulkImportPage() {
             rowIndex: err.rowIndex + offset,
           });
         });
+        batchResult.skipped.forEach((s) => {
+          aggregated.skipped.push({
+            ...s,
+            rowIndex: s.rowIndex + offset,
+          });
+        });
       }
 
-      if (aggregated.failureCount === 0) {
+      if (aggregated.failureCount === 0 && aggregated.skippedCount === 0) {
         toast.success(
           `Import complete! ${aggregated.successCount} products imported successfully.`
         );
+      } else if (aggregated.failureCount === 0) {
+        toast.success(
+          `Import complete! ${aggregated.successCount} imported, ${aggregated.skippedCount} skipped (already exist).`
+        );
       } else {
         toast.warning(
-          `Import complete with errors: ${aggregated.successCount} succeeded, ${aggregated.failureCount} failed.`
+          `Import complete: ${aggregated.successCount} succeeded, ${aggregated.skippedCount} skipped, ${aggregated.failureCount} failed.`
         );
       }
     } catch (error) {
@@ -498,7 +526,9 @@ export default function BulkImportPage() {
           {/* Summary */}
           <div className="rounded-md border p-6">
             <div className="flex items-center gap-3 mb-4">
-              {results.failureCount === 0 ? (
+              {results.failureCount === 0 && results.skippedCount === 0 ? (
+                <CheckCircle2 className="h-6 w-6 text-green-600" />
+              ) : results.failureCount === 0 ? (
                 <CheckCircle2 className="h-6 w-6 text-green-600" />
               ) : (
                 <AlertCircle className="h-6 w-6 text-yellow-600" />
@@ -506,11 +536,17 @@ export default function BulkImportPage() {
               <h2 className="text-lg font-semibold">Import Complete</h2>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground">Succeeded</p>
                 <p className="text-2xl font-bold text-green-600">
                   {results.successCount}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Skipped</p>
+                <p className="text-2xl font-bold text-amber-600">
+                  {results.skippedCount}
                 </p>
               </div>
               <div>
@@ -565,6 +601,42 @@ export default function BulkImportPage() {
                         </TableCell>
                         <TableCell className="text-destructive">
                           {err.error}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          {/* Skipped Table */}
+          {results.skipped.length > 0 && (
+            <div>
+              <h3 className="text-base font-semibold mb-2 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-600" />
+                Skipped Rows ({results.skipped.length})
+              </h3>
+              <div className="rounded-md border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Row</TableHead>
+                      <TableHead>SKU</TableHead>
+                      <TableHead>Reason</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {results.skipped.map((s, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell>
+                          <Badge variant="outline" className="border-amber-300 text-amber-700">{s.rowIndex + 1}</Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {s.sku}
+                        </TableCell>
+                        <TableCell className="text-amber-600">
+                          {s.reason}
                         </TableCell>
                       </TableRow>
                     ))}

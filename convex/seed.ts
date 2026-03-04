@@ -378,8 +378,12 @@ export const seedDatabase = action({
             userId: user._id,
           }
         );
-        variantIds.push(variantId);
-        successCount++;
+        if (variantId.status === "created") {
+          variantIds.push(variantId.variantId);
+          successCount++;
+        } else {
+          skipCount++;
+        }
       } catch {
         skipCount++;
       }

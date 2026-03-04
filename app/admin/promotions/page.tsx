@@ -83,11 +83,11 @@ function dateInputToTs(value: string): number {
 
 /** Derive the display status from a promotion document. */
 function getPromoStatus(
-  promo: { isActive: boolean; startDate: number; endDate: number }
+  promo: { isActive: boolean; startDate: number; endDate?: number }
 ): "active" | "inactive" | "expired" | "upcoming" {
   const now = Date.now();
   if (!promo.isActive) return "inactive";
-  if (now > promo.endDate) return "expired";
+  if (promo.endDate !== undefined && now > promo.endDate) return "expired";
   if (now < promo.startDate) return "upcoming";
   return "active";
 }
@@ -147,6 +147,7 @@ interface PromoForm {
   tieredDiscountCentavos: string;
   startDate: string;
   endDate: string;
+  noExpiration: boolean;
   isActive: boolean;
   priority: string;
   allBranches: boolean;
@@ -169,6 +170,7 @@ function emptyForm(): PromoForm {
     tieredDiscountCentavos: "",
     startDate: "",
     endDate: "",
+    noExpiration: false,
     isActive: true,
     priority: "0",
     allBranches: true,
@@ -285,7 +287,8 @@ export default function PromotionsPage() {
       minSpendCentavos: promo.minSpendCentavos?.toString() ?? "",
       tieredDiscountCentavos: promo.tieredDiscountCentavos?.toString() ?? "",
       startDate: tsToDateInput(promo.startDate),
-      endDate: tsToDateInput(promo.endDate),
+      endDate: promo.endDate !== undefined ? tsToDateInput(promo.endDate) : "",
+      noExpiration: promo.endDate === undefined,
       isActive: promo.isActive,
       priority: promo.priority.toString(),
       allBranches: promo.branchIds.length === 0,
@@ -304,7 +307,7 @@ export default function PromotionsPage() {
 
   function buildArgs() {
     const startTs = dateInputToTs(form.startDate);
-    const endTs = dateInputToTs(form.endDate);
+    const endTs = form.noExpiration ? undefined : dateInputToTs(form.endDate);
     return {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
@@ -353,8 +356,12 @@ export default function PromotionsPage() {
       toast.error("Promotion name is required");
       return;
     }
-    if (!form.startDate || !form.endDate) {
-      toast.error("Start and end dates are required");
+    if (!form.startDate) {
+      toast.error("Start date is required");
+      return;
+    }
+    if (!form.noExpiration && !form.endDate) {
+      toast.error("End date is required (or enable 'No expiration')");
       return;
     }
 
@@ -506,7 +513,7 @@ export default function PromotionsPage() {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                       {formatDate(promo.startDate)} -{" "}
-                      {formatDate(promo.endDate)}
+                      {promo.endDate !== undefined ? formatDate(promo.endDate) : "No expiration"}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary" className={badge.className}>
@@ -773,15 +780,30 @@ export default function PromotionsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="promo-end">
-                  End Date <span className="text-destructive">*</span>
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="promo-end">
+                    End Date {!form.noExpiration && <span className="text-destructive">*</span>}
+                  </Label>
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.noExpiration}
+                      onChange={(e) => {
+                        updateField("noExpiration", e.target.checked);
+                        if (e.target.checked) updateField("endDate", "");
+                      }}
+                      className="rounded border-gray-300"
+                    />
+                    No expiration
+                  </label>
+                </div>
                 <input
                   id="promo-end"
                   type="date"
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
                   value={form.endDate}
                   onChange={(e) => updateField("endDate", e.target.value)}
+                  disabled={form.noExpiration}
                 />
               </div>
             </div>
