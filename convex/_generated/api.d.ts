@@ -16,8 +16,10 @@ import type * as _helpers_promoCalculations from "../_helpers/promoCalculations.
 import type * as _helpers_taxCalculations from "../_helpers/taxCalculations.js";
 import type * as _helpers_transferStock from "../_helpers/transferStock.js";
 import type * as _helpers_withBranchScope from "../_helpers/withBranchScope.js";
+import type * as admin_colors from "../admin/colors.js";
 import type * as admin_promotions from "../admin/promotions.js";
 import type * as admin_settings from "../admin/settings.js";
+import type * as admin_sizes from "../admin/sizes.js";
 import type * as ai_branchScoring from "../ai/branchScoring.js";
 import type * as ai_restockSuggestions from "../ai/restockSuggestions.js";
 import type * as audit_logs from "../audit/logs.js";
@@ -84,8 +86,10 @@ declare const fullApi: ApiFromModules<{
   "_helpers/taxCalculations": typeof _helpers_taxCalculations;
   "_helpers/transferStock": typeof _helpers_transferStock;
   "_helpers/withBranchScope": typeof _helpers_withBranchScope;
+  "admin/colors": typeof admin_colors;
   "admin/promotions": typeof admin_promotions;
   "admin/settings": typeof admin_settings;
+  "admin/sizes": typeof admin_sizes;
   "ai/branchScoring": typeof ai_branchScoring;
   "ai/restockSuggestions": typeof ai_restockSuggestions;
   "audit/logs": typeof audit_logs;
