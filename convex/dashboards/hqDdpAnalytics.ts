@@ -655,3 +655,230 @@ export const getHQDemandForecast = query({
     return forecast;
   },
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRESCRIPTIVE — AI Insights Snapshot (data for LLM consumption)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const getInsightsSnapshot = query({
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const { startMs, endMs, durationMs, durationDays } = resolvePeriod(args);
+    const prevStartMs = startMs - durationMs;
+    const prevEndMs = startMs;
+
+    const allBranches = await ctx.db
+      .query("branches")
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .collect();
+    const retailBranches = allBranches.filter((b) => b.type !== "warehouse");
+
+    // ── Sales (current + previous period) ─────────────────────────────────
+    const allTxns = (
+      await Promise.all(
+        retailBranches.map((branch) =>
+          ctx.db
+            .query("transactions")
+            .withIndex("by_branch_date", (q) =>
+              q.eq("branchId", branch._id).gte("createdAt", prevStartMs)
+            )
+            .collect()
+        )
+      )
+    ).flat();
+
+    const curTxns = allTxns.filter((t) => t.createdAt >= startMs && t.createdAt <= endMs);
+    const prevTxns = allTxns.filter((t) => t.createdAt >= prevStartMs && t.createdAt < prevEndMs);
+
+    const curRev = curTxns.reduce((s, t) => s + t.totalCentavos, 0);
+    const prevRev = prevTxns.reduce((s, t) => s + t.totalCentavos, 0);
+
+    // Items sold (current only)
+    const curItemArrays = await Promise.all(
+      curTxns.map((txn) =>
+        ctx.db
+          .query("transactionItems")
+          .withIndex("by_transaction", (q) => q.eq("transactionId", txn._id))
+          .collect()
+      )
+    );
+    const curItems = curItemArrays.flat();
+    const curItemsSold = curItems.reduce((s, item) => s + item.quantity, 0);
+
+    // ── Top products (top 5) ──────────────────────────────────────────────
+    const variantAgg = new Map<string, { qty: number; revenue: number }>();
+    for (const item of curItems) {
+      const key = item.variantId as string;
+      const existing = variantAgg.get(key) ?? { qty: 0, revenue: 0 };
+      existing.qty += item.quantity;
+      existing.revenue += item.lineTotalCentavos;
+      variantAgg.set(key, existing);
+    }
+    const topVariants = Array.from(variantAgg.entries())
+      .sort((a, b) => b[1].revenue - a[1].revenue)
+      .slice(0, 5);
+    const topProducts = await Promise.all(
+      topVariants.map(async ([vid, agg]) => {
+        const variant = await ctx.db.get(vid as Id<"variants">);
+        const style = variant ? await ctx.db.get(variant.styleId) : null;
+        return {
+          styleName: style?.name ?? "Unknown",
+          size: variant?.size ?? "",
+          color: variant?.color ?? "",
+          qty: agg.qty,
+          revenueCentavos: agg.revenue,
+        };
+      })
+    );
+
+    // ── Payment mix ───────────────────────────────────────────────────────
+    const paymentCounts: Record<string, number> = { cash: 0, gcash: 0, maya: 0 };
+    for (const txn of curTxns) {
+      if (paymentCounts[txn.paymentMethod] !== undefined) {
+        paymentCounts[txn.paymentMethod] += 1;
+      }
+    }
+    const totalTxns = curTxns.length;
+    const paymentMix = Object.entries(paymentCounts).map(([method, count]) => ({
+      method,
+      count,
+      percentage: totalTxns > 0 ? Math.round((count / totalTxns) * 100) : 0,
+    }));
+
+    // ── Inventory health ──────────────────────────────────────────────────
+    const allInventory = (
+      await Promise.all(
+        allBranches.map((branch) =>
+          ctx.db
+            .query("inventory")
+            .withIndex("by_branch", (q) => q.eq("branchId", branch._id))
+            .collect()
+        )
+      )
+    ).flat();
+    const totalSkus = allInventory.length;
+    const outOfStock = allInventory.filter((i) => i.quantity <= 0).length;
+    const lowStock = allInventory.filter(
+      (i) => i.quantity > 0 && i.quantity <= (i.lowStockThreshold ?? 5)
+    ).length;
+
+    // ── Product velocity (fast 3 + slow 3) ────────────────────────────────
+    const variantSales = new Map<string, number>();
+    for (const item of curItems) {
+      const key = item.variantId as string;
+      variantSales.set(key, (variantSales.get(key) ?? 0) + item.quantity);
+    }
+    const inventoryMap = new Map<string, number>();
+    for (const inv of allInventory) {
+      const key = inv.variantId as string;
+      inventoryMap.set(key, (inventoryMap.get(key) ?? 0) + inv.quantity);
+    }
+    const velocityEntries: { variantId: string; avgDaily: number; stock: number }[] = [];
+    const allVids = new Set([...variantSales.keys(), ...Array.from(inventoryMap.entries()).filter(([, q]) => q > 0).map(([v]) => v)]);
+    for (const vid of allVids) {
+      const sold = variantSales.get(vid) ?? 0;
+      velocityEntries.push({
+        variantId: vid,
+        avgDaily: Math.round((sold / durationDays) * 10) / 10,
+        stock: inventoryMap.get(vid) ?? 0,
+      });
+    }
+    const fastRaw = [...velocityEntries].sort((a, b) => b.avgDaily - a.avgDaily).slice(0, 3);
+    const slowRaw = velocityEntries.filter((e) => e.stock > 0).sort((a, b) => a.avgDaily - b.avgDaily).slice(0, 3);
+    async function enrichVelocity(items: typeof fastRaw) {
+      return Promise.all(items.map(async (item) => {
+        const variant = await ctx.db.get(item.variantId as Id<"variants">);
+        const style = variant ? await ctx.db.get(variant.styleId) : null;
+        return { styleName: style?.name ?? "Unknown", avgDaily: item.avgDaily, stock: item.stock };
+      }));
+    }
+    const [fastMovers, slowMovers] = await Promise.all([enrichVelocity(fastRaw), enrichVelocity(slowRaw)]);
+
+    // ── Demand gaps (top 5) ───────────────────────────────────────────────
+    const allDemandLogs = await ctx.db.query("demandLogs").collect();
+    const recentDemand = allDemandLogs.filter((d) => d.createdAt >= startMs && d.createdAt <= endMs);
+    const demandAgg = new Map<string, { brand: string; design: string; count: number }>();
+    for (const log of recentDemand) {
+      const key = `${log.brand}|${log.design ?? ""}`;
+      const existing = demandAgg.get(key);
+      if (existing) existing.count += 1;
+      else demandAgg.set(key, { brand: log.brand, design: log.design ?? "", count: 1 });
+    }
+    const demandGaps = Array.from(demandAgg.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5)
+      .map((d) => ({ brand: d.brand, design: d.design, requests: d.count }));
+
+    // ── Transfer efficiency ───────────────────────────────────────────────
+    const thirtyDaysAgo = Date.now() - 30 * DAY_MS;
+    const allTransfers = await ctx.db.query("transfers").order("desc").collect();
+    const delivered = allTransfers.filter((t) => t.status === "delivered" && t.deliveredAt && t.deliveredAt >= thirtyDaysAgo);
+    const pending = allTransfers.filter((t) => t.status !== "delivered" && t.status !== "rejected" && t.status !== "cancelled");
+    const avgHours = delivered.length > 0
+      ? Math.round((delivered.reduce((s, t) => s + (t.deliveredAt! - t.createdAt) / 3_600_000, 0) / delivered.length) * 10) / 10
+      : 0;
+
+    // ── Revenue projection ────────────────────────────────────────────────
+    const todayStart = getPHTDayStartMs();
+    const nowPht = Date.now() + PHT_OFFSET_MS;
+    const dayOfWeek = new Date(nowPht).getUTCDay();
+    const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const mondayStart = todayStart - daysSinceMonday * DAY_MS;
+    const lastMondayStart = mondayStart - 7 * DAY_MS;
+    const thisWeekTxns = allTxns.filter((t) => t.createdAt >= mondayStart);
+    const lastWeekTxns = allTxns.filter((t) => t.createdAt >= lastMondayStart && t.createdAt < mondayStart);
+    const weekRev = thisWeekTxns.reduce((s, t) => s + t.totalCentavos, 0);
+    const daysElapsed = Math.max(1, daysSinceMonday + 1);
+
+    // ── Restock urgency ───────────────────────────────────────────────────
+    const restockSuggestions = await ctx.db
+      .query("restockSuggestions")
+      .filter((q) => q.eq(q.field("status"), "active"))
+      .collect();
+    const restockUrgentCount = restockSuggestions.filter((s) => s.daysUntilStockout <= 3).length;
+
+    // ── Demand trending (top 3) ───────────────────────────────────────────
+    const demandTrending = Array.from(demandAgg.values())
+      .filter((d) => d.count >= 3)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3)
+      .map((d) => ({ brand: d.brand, design: d.design, requests: d.count }));
+
+    return {
+      period: { startMs, endMs, durationDays: Math.round(durationDays * 10) / 10 },
+      sales: {
+        current: {
+          revenueCentavos: curRev,
+          txnCount: curTxns.length,
+          itemsSold: curItemsSold,
+          avgTxnCentavos: curTxns.length > 0 ? Math.round(curRev / curTxns.length) : 0,
+        },
+        previous: {
+          revenueCentavos: prevRev,
+          txnCount: prevTxns.length,
+        },
+        branchCount: retailBranches.length,
+      },
+      topProducts,
+      inventoryHealth: { totalSkus, healthy: totalSkus - outOfStock - lowStock, lowStock, outOfStock },
+      paymentMix,
+      fastMovers,
+      slowMovers,
+      demandGaps,
+      transferEfficiency: { avgHours, completed: delivered.length, pending: pending.length },
+      projection: {
+        currentWeekRevCentavos: weekRev,
+        projectedCentavos: Math.round((weekRev / daysElapsed) * 7),
+        lastWeekCentavos: lastWeekTxns.reduce((s, t) => s + t.totalCentavos, 0),
+        daysElapsed,
+      },
+      restockUrgentCount,
+      demandTrending,
+    };
+  },
+});

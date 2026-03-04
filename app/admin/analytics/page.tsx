@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
@@ -144,12 +144,13 @@ function getPresetMs(preset: DatePreset): { startMs: number; endMs: number; labe
 
 // ─── Tab Types ────────────────────────────────────────────────────────────────
 
-type AnalyticsTab = "descriptive" | "diagnostic" | "predictive";
+type AnalyticsTab = "descriptive" | "diagnostic" | "predictive" | "prescriptive";
 
 const ANALYTICS_TABS: { value: AnalyticsTab; label: string; description: string }[] = [
   { value: "descriptive", label: "Descriptive", description: "What happened" },
   { value: "diagnostic", label: "Diagnostic", description: "Why it happened" },
   { value: "predictive", label: "Predictive", description: "What will happen" },
+  { value: "prescriptive", label: "Prescriptive", description: "Key insights" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -207,6 +208,58 @@ export default function HQAnalyticsPage() {
     api.dashboards.hqDdpAnalytics.getHQDemandForecast,
     activeTab === "predictive" ? { startMs, endMs } : "skip"
   );
+
+  // Prescriptive
+  const insightsSnapshot = useQuery(
+    api.dashboards.hqDdpAnalytics.getInsightsSnapshot,
+    activeTab === "prescriptive" ? { startMs, endMs } : "skip"
+  );
+  const [insightsText, setInsightsText] = useState("");
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const generateInsights = useCallback(async () => {
+    if (!insightsSnapshot) return;
+    setInsightsText("");
+    setInsightsError(null);
+    setInsightsLoading(true);
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch("/api/analytics/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(insightsSnapshot),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response stream");
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        setInsightsText(accumulated);
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      setInsightsError(err instanceof Error ? err.message : "Failed to generate insights");
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, [insightsSnapshot]);
 
   const todayLabel = new Date().toLocaleDateString("en-PH", {
     timeZone: "Asia/Manila",
@@ -758,6 +811,132 @@ export default function HQAnalyticsPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ═══ PRESCRIPTIVE TAB ═════════════════════════════════════════════ */}
+      {activeTab === "prescriptive" && (
+        <div className="space-y-6">
+          <div className="rounded-lg border p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">AI-Generated Insights</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Powered by Google Gemini &middot; Based on your {periodLabel.toLowerCase()} analytics data
+                  {insightsSnapshot ? ` across ${insightsSnapshot.sales.branchCount} retail branches` : ""}
+                </p>
+              </div>
+              {insightsText && !insightsLoading && (
+                <button
+                  onClick={generateInsights}
+                  className="rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  Regenerate
+                </button>
+              )}
+            </div>
+
+            {/* Not yet generated */}
+            {!insightsText && !insightsLoading && !insightsError && (
+              <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                {insightsSnapshot === undefined ? (
+                  <Skeleton className="h-10 w-48" />
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground text-center max-w-md">
+                      AI will analyze your sales, inventory, demand, and operational data to surface
+                      notable patterns and anomalies.
+                    </p>
+                    <button
+                      onClick={generateInsights}
+                      disabled={!insightsSnapshot}
+                      className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                    >
+                      Generate Insights
+                    </button>
+                    <p className="text-xs text-muted-foreground">
+                      Observations only — not financial or business advice
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Loading */}
+            {insightsLoading && !insightsText && (
+              <div className="flex items-center gap-2 py-8 justify-center">
+                <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                <span className="text-sm text-muted-foreground ml-2">Analyzing data...</span>
+              </div>
+            )}
+
+            {/* Error */}
+            {insightsError && (
+              <div className="rounded-md border border-red-200 bg-red-50 p-4 space-y-2">
+                <p className="text-sm text-red-800">{insightsError}</p>
+                <button
+                  onClick={generateInsights}
+                  className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
+
+            {/* Streamed insights */}
+            {insightsText && (
+              <div className="prose prose-sm max-w-none">
+                {insightsText.split("\n").map((line, i) => {
+                  const trimmed = line.trim();
+                  if (!trimmed) return <div key={i} className="h-2" />;
+
+                  // Bold headers like **Revenue**
+                  if (/^\*\*(.+)\*\*$/.test(trimmed)) {
+                    const header = trimmed.replace(/\*\*/g, "");
+                    return (
+                      <h4 key={i} className="text-sm font-semibold mt-4 mb-1 text-foreground">
+                        {header}
+                      </h4>
+                    );
+                  }
+
+                  // Bullet points
+                  if (/^[-•*]\s/.test(trimmed)) {
+                    const text = trimmed.replace(/^[-•*]\s+/, "");
+                    return (
+                      <div key={i} className="flex items-start gap-2 text-sm text-muted-foreground py-0.5">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                        <span dangerouslySetInnerHTML={{
+                          __html: text
+                            .replace(/\*\*(.+?)\*\*/g, "<strong class='text-foreground'>$1</strong>")
+                            .replace(/`(.+?)`/g, "<code class='text-xs bg-muted px-1 py-0.5 rounded'>$1</code>"),
+                        }} />
+                      </div>
+                    );
+                  }
+
+                  // Regular text
+                  return (
+                    <p key={i} className="text-sm text-muted-foreground" dangerouslySetInnerHTML={{
+                      __html: trimmed
+                        .replace(/\*\*(.+?)\*\*/g, "<strong class='text-foreground'>$1</strong>")
+                        .replace(/`(.+?)`/g, "<code class='text-xs bg-muted px-1 py-0.5 rounded'>$1</code>"),
+                    }} />
+                  );
+                })}
+                {insightsLoading && (
+                  <span className="inline-block h-4 w-1 bg-primary animate-pulse ml-0.5" />
+                )}
+              </div>
+            )}
+          </div>
+
+          <p className="text-xs text-muted-foreground text-center">
+            These are AI-generated observations based on your analytics data.
+            They are not financial or business advice.
+          </p>
         </div>
       )}
     </div>
