@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -25,6 +26,34 @@ function matchesGender(genders: string[], gender: GenderKey): boolean {
 }
 
 export default function BrandsPage() {
+  return (
+    <Suspense fallback={<BrandsSkeleton />}>
+      <BrandsContent />
+    </Suspense>
+  );
+}
+
+function BrandsSkeleton() {
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-6">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="h-6 w-6 animate-pulse rounded bg-secondary" />
+        <div className="h-6 w-48 animate-pulse rounded bg-secondary" />
+      </div>
+      <div className="space-y-4 mb-6">
+        <div className="h-48 animate-pulse rounded-xl bg-secondary" />
+        <div className="h-48 animate-pulse rounded-xl bg-secondary" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-40 animate-pulse rounded-xl bg-secondary" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BrandsContent() {
   const searchParams = useSearchParams();
   const gender = (searchParams.get("gender") as GenderKey) ?? "womens";
   const data = useQuery(api.storefront.homepage.getHomepageData);
@@ -32,25 +61,7 @@ export default function BrandsPage() {
   const label = GENDER_LABELS[gender] ?? "All";
 
   if (data === undefined) {
-    return (
-      <div className="mx-auto max-w-2xl px-4 py-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="h-6 w-6 animate-pulse rounded bg-secondary" />
-          <div className="h-6 w-48 animate-pulse rounded bg-secondary" />
-        </div>
-        {/* Hero skeleton */}
-        <div className="space-y-4 mb-6">
-          <div className="h-48 animate-pulse rounded-xl bg-secondary" />
-          <div className="h-48 animate-pulse rounded-xl bg-secondary" />
-        </div>
-        {/* Grid skeleton */}
-        <div className="grid grid-cols-2 gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-40 animate-pulse rounded-xl bg-secondary" />
-          ))}
-        </div>
-      </div>
-    );
+    return <BrandsSkeleton />;
   }
 
   const filteredBrands = data.brands.filter((b) =>
