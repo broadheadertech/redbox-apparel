@@ -196,7 +196,7 @@ export default function TagProductsPage() {
   if (data === null) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-12 text-center">
-        <p className="text-muted-foreground">No products found for "{tag}".</p>
+        <p className="text-muted-foreground">No products found for &ldquo;{tag}&rdquo;.</p>
         <Link
           href="/categories"
           className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline"

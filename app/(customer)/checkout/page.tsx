@@ -107,8 +107,9 @@ export default function CheckoutPage() {
       });
       toast.success(`Order ${result.orderNumber} placed!`);
       router.push(`/account/orders/${result.orderId}`);
-    } catch (err: any) {
-      toast.error(err.data?.message ?? "Failed to place order");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to place order";
+      toast.error(message);
     } finally {
       setPlacing(false);
     }
