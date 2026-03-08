@@ -76,6 +76,15 @@ export default function StyleDetailPage() {
   const createReservation = useMutation(api.reservations.reservations.createReservationPublic);
   const addToCart = useMutation(api.storefront.cart.addToCart);
   const [addingToCart, setAddingToCart] = useState(false);
+  const trackView = useMutation(api.storefront.recentlyViewed.trackView);
+
+  // Track product view
+  useEffect(() => {
+    if (styleId) {
+      trackView({ styleId }).catch(() => {}); // fire-and-forget, ignore auth errors
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [styleId]);
 
   // Extract unique colors (memoized to avoid recreating on every render)
   const uniqueColors = useMemo(

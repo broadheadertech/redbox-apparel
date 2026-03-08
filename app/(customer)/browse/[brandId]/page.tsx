@@ -16,6 +16,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { CustomerProductCard } from "@/components/customer/CustomerProductCard";
+import { QuickViewSheet } from "@/components/customer/QuickViewSheet";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -73,6 +74,9 @@ export default function BrandPage() {
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [selectedColors, setSelectedColors] = useState<Set<string>>(new Set());
   const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set());
+
+  // QuickView state
+  const [quickViewStyleId, setQuickViewStyleId] = useState<Id<"styles"> | null>(null);
 
   const activeFilterCount =
     selectedCategories.size + selectedColors.size + selectedSizes.size;
@@ -309,12 +313,19 @@ export default function BrandPage() {
                   variantCount={style.variantCount}
                   branchCount={style.branchCount}
                   sizes={style.sizes}
+                  onQuickView={setQuickViewStyleId}
                 />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* ═══ Quick View Sheet ═══ */}
+      <QuickViewSheet
+        styleId={quickViewStyleId}
+        onClose={() => setQuickViewStyleId(null)}
+      />
 
       {/* ═══ Sort Bottom Sheet ═══ */}
       {showSort && (

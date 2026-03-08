@@ -73,6 +73,7 @@ import type * as storefront_cart from "../storefront/cart.js";
 import type * as storefront_customers from "../storefront/customers.js";
 import type * as storefront_homepage from "../storefront/homepage.js";
 import type * as storefront_orders from "../storefront/orders.js";
+import type * as storefront_recentlyViewed from "../storefront/recentlyViewed.js";
 import type * as storefront_wishlist from "../storefront/wishlist.js";
 import type * as suppliers_portal from "../suppliers/portal.js";
 import type * as transfers_fulfillment from "../transfers/fulfillment.js";
@@ -150,6 +151,7 @@ declare const fullApi: ApiFromModules<{
   "storefront/customers": typeof storefront_customers;
   "storefront/homepage": typeof storefront_homepage;
   "storefront/orders": typeof storefront_orders;
+  "storefront/recentlyViewed": typeof storefront_recentlyViewed;
   "storefront/wishlist": typeof storefront_wishlist;
   "suppliers/portal": typeof suppliers_portal;
   "transfers/fulfillment": typeof transfers_fulfillment;

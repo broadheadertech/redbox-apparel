@@ -46,7 +46,7 @@ export default function AddressesPage() {
     setShowDialog(true);
   };
 
-  const openEdit = (addr: any) => {
+  const openEdit = (addr: NonNullable<typeof addresses>[number]) => {
     setEditingId(addr._id);
     setForm({
       label: addr.label,

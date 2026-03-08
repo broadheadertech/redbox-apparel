@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Layers } from "lucide-react";
+import { Eye, Layers } from "lucide-react";
 import { Id } from "@/convex/_generated/dataModel";
 import { formatPrice } from "@/lib/utils";
 
@@ -16,6 +16,7 @@ interface CustomerProductCardProps {
   variantCount: number;
   branchCount: number;
   sizes?: string[];
+  onQuickView?: (styleId: Id<"styles">) => void;
 }
 
 function StockDot({ branchCount }: { branchCount: number }) {
@@ -37,6 +38,7 @@ export function CustomerProductCard({
   brandLogoUrl,
   branchCount,
   sizes,
+  onQuickView,
 }: CustomerProductCardProps) {
   return (
     <Link
@@ -45,6 +47,20 @@ export function CustomerProductCard({
     >
       {/* Image container — 3:4 portrait aspect ratio */}
       <div className="relative aspect-[3/4] w-full bg-secondary">
+        {/* Quick View button */}
+        {onQuickView && (
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onQuickView(styleId);
+            }}
+            className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-900 opacity-0 shadow-md backdrop-blur-sm transition-all group-hover:opacity-100"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            Quick View
+          </button>
+        )}
         {imageUrl ? (
           <Image
             src={imageUrl}

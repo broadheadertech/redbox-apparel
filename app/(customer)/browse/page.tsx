@@ -16,6 +16,7 @@ import {
   Percent,
   Gift,
   ArrowRight,
+  TrendingUp,
 } from "lucide-react";
 
 // ─── Horizontal Scroll Helper ────────────────────────────────────────────────
@@ -579,6 +580,9 @@ export default function BrowsePage() {
         <HeroBannerCarousel dbBanners={heroBanners} />
       </div>
 
+      {/* ── 3b. Trending Now ── */}
+      <TrendingNowSection />
+
       {/* ── 4. Hot Deals Mini Carousel ── */}
       {promotions.length > 0 && (
         <div className="mx-auto max-w-7xl px-4 pt-6">
@@ -806,7 +810,10 @@ export default function BrowsePage() {
         </div>
       )}
 
-      {/* ── 9. Free Shipping Banner ── */}
+      {/* ── 9. Recently Viewed ── */}
+      <RecentlyViewedSection />
+
+      {/* ── 10. Free Shipping Banner ── */}
       <div className="mx-auto max-w-7xl px-4 pt-8">
         <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5">
           <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-green-500/10 text-green-600">
@@ -828,6 +835,132 @@ export default function BrowsePage() {
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Trending Now Section ─────────────────────────────────────────────────────
+function TrendingNowSection() {
+  const trending = useQuery(api.storefront.homepage.getTrendingProducts, {
+    limit: 12,
+  });
+
+  if (!trending || trending.length === 0) return null;
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 pt-6">
+      <div className="flex items-center gap-2">
+        <TrendingUp className="h-5 w-5 text-primary" />
+        <h2 className="font-display text-lg font-bold uppercase tracking-tight">
+          Trending Now
+        </h2>
+      </div>
+      <HScrollRow className="mt-4">
+        {trending.map((product) => (
+          <Link
+            key={product.styleId}
+            href={`/browse/style/${product.styleId}`}
+            className="group flex-shrink-0 snap-start overflow-hidden rounded-lg border border-border bg-card"
+            style={{ width: 180 }}
+          >
+            <div className="relative aspect-[3/4] w-full bg-secondary">
+              {product.primaryImageUrl ? (
+                <Image
+                  src={product.primaryImageUrl}
+                  alt={product.name}
+                  fill
+                  sizes="180px"
+                  className="object-cover transition-transform group-hover:scale-105"
+                />
+              ) : product.brandLogoUrl ? (
+                <div className="flex h-full items-center justify-center p-6">
+                  <Image
+                    src={product.brandLogoUrl}
+                    alt={product.brandName}
+                    fill
+                    sizes="180px"
+                    className="object-contain p-6"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <ShoppingBag className="h-8 w-8 text-muted-foreground/40" />
+                </div>
+              )}
+              {/* Sold count badge */}
+              <div className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
+                <TrendingUp className="h-3 w-3" />
+                {product.soldCount} sold
+              </div>
+            </div>
+            <div className="p-2.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                {product.brandName}
+              </p>
+              <p className="mt-0.5 text-sm font-medium leading-tight line-clamp-2">
+                {product.name}
+              </p>
+              <p className="mt-1 font-mono text-sm font-bold text-primary">
+                {formatPrice(product.basePriceCentavos)}
+              </p>
+            </div>
+          </Link>
+        ))}
+      </HScrollRow>
+    </div>
+  );
+}
+
+// ─── Recently Viewed Section ─────────────────────────────────────────────────
+function RecentlyViewedSection() {
+  const recentlyViewed = useQuery(
+    api.storefront.recentlyViewed.getRecentlyViewed,
+    { limit: 12 }
+  );
+
+  if (!recentlyViewed || recentlyViewed.length === 0) return null;
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 pt-8">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-display text-base font-bold uppercase tracking-tight">
+          Continue Shopping
+        </h2>
+      </div>
+      <HScrollRow>
+        {recentlyViewed.map((item) => (
+          <Link
+            key={item!.styleId}
+            href={`/browse/style/${item!.styleId}`}
+            className="w-36 flex-shrink-0 snap-start"
+          >
+            <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-border bg-secondary">
+              {item!.primaryImageUrl ? (
+                <Image
+                  src={item!.primaryImageUrl}
+                  alt={item!.name}
+                  fill
+                  sizes="144px"
+                  className="object-cover"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  <ShoppingBag className="h-8 w-8" />
+                </div>
+              )}
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground line-clamp-1">
+              {item!.brandName}
+            </p>
+            <p className="mt-0.5 text-sm font-medium leading-tight line-clamp-2">
+              {item!.name}
+            </p>
+            <p className="mt-1 font-mono text-sm font-bold text-primary">
+              {formatPrice(item!.basePriceCentavos)}
+            </p>
+          </Link>
+        ))}
+      </HScrollRow>
     </div>
   );
 }

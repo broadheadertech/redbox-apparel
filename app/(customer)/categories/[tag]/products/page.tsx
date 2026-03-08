@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { CustomerProductCard } from "@/components/customer/CustomerProductCard";
+import { QuickViewSheet } from "@/components/customer/QuickViewSheet";
+import { Id } from "@/convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -72,6 +74,9 @@ export default function TagProductsPage() {
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedColors, setSelectedColors] = useState<Set<string>>(new Set());
   const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set());
+
+  // QuickView state
+  const [quickViewStyleId, setQuickViewStyleId] = useState<Id<"styles"> | null>(null);
 
   const activeFilterCount =
     selectedBrands.size + selectedColors.size + selectedSizes.size;
@@ -314,6 +319,7 @@ export default function TagProductsPage() {
                   variantCount={style.variantCount}
                   branchCount={style.branchCount}
                   sizes={style.sizes}
+                  onQuickView={setQuickViewStyleId}
                 />
               ))}
             </div>
@@ -358,6 +364,12 @@ export default function TagProductsPage() {
           </div>
         </div>
       )}
+
+      {/* ═══ Quick View Sheet ═══ */}
+      <QuickViewSheet
+        styleId={quickViewStyleId}
+        onClose={() => setQuickViewStyleId(null)}
+      />
 
       {/* ═══ Filter Full-Screen Panel ═══ */}
       {showFilter && (
