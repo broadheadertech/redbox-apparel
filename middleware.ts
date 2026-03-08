@@ -12,6 +12,10 @@ const PUBLIC_PREFIXES = [
   "/products",
   "/branches",
   "/reserve",
+  "/search",
+  "/cart",
+  "/checkout",
+  "/account",
 ];
 
 const ROLE_ROUTE_ACCESS: Record<string, readonly string[]> = {

@@ -21,6 +21,7 @@ import {
   FileText,
   Settings,
   Tag,
+  ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -52,6 +53,7 @@ const managementNavItems: NavItem[] = [
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
   { href: "/admin/invoices", label: "Invoices", icon: FileText, roles: ["admin"] },
   { href: "/admin/promotions", label: "Promotions", icon: Tag, roles: ["admin"] },
+  { href: "/admin/banners", label: "Banners", icon: ImageIcon, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
 ];
 

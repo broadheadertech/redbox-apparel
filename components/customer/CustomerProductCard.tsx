@@ -12,6 +12,7 @@ interface CustomerProductCardProps {
   brandName?: string;
   priceCentavos: number;
   imageUrl: string | null;
+  brandLogoUrl?: string | null;
   variantCount: number;
   branchCount: number;
   sizes?: string[];
@@ -33,6 +34,7 @@ export function CustomerProductCard({
   brandName,
   priceCentavos,
   imageUrl,
+  brandLogoUrl,
   branchCount,
   sizes,
 }: CustomerProductCardProps) {
@@ -51,6 +53,16 @@ export function CustomerProductCard({
             sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
             className="object-cover transition-transform group-hover:scale-105"
           />
+        ) : brandLogoUrl ? (
+          <div className="flex h-full items-center justify-center p-6">
+            <Image
+              src={brandLogoUrl}
+              alt={brandName ?? "Brand"}
+              fill
+              sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
+              className="object-contain p-6"
+            />
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <Layers className="h-8 w-8" />

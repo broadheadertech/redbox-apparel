@@ -7,7 +7,7 @@ import type { Id } from "../_generated/dataModel";
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const MAX_BATCH_SIZE = 500;
-const VALID_GENDERS = ["mens", "womens", "unisex", "kids"];
+const VALID_GENDERS = ["mens", "womens", "unisex", "kids", "boys", "girls"];
 
 // ─── Internal Query: Admin Role Verification ────────────────────────────────
 
@@ -54,6 +54,7 @@ export const _verifyAdminRole = internalQuery({
 export const _findOrCreateBrand = internalMutation({
   args: {
     name: v.string(),
+    tags: v.optional(v.array(v.string())),
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
@@ -68,6 +69,7 @@ export const _findOrCreateBrand = internalMutation({
 
     const brandId = await ctx.db.insert("brands", {
       name: args.name,
+      tags: args.tags,
       isActive: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -89,6 +91,7 @@ export const _findOrCreateCategory = internalMutation({
   args: {
     brandId: v.id("brands"),
     name: v.string(),
+    tag: v.optional(v.string()),
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
@@ -107,6 +110,7 @@ export const _findOrCreateCategory = internalMutation({
     const categoryId = await ctx.db.insert("categories", {
       brandId: args.brandId,
       name: args.name,
+      tag: args.tag,
       isActive: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),

@@ -7,7 +7,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ShoppingBag, Heart } from "lucide-react";
 import { toast } from "sonner";
 import { cn, formatPrice } from "@/lib/utils";
 import { BranchStockDisplay } from "@/components/shared/BranchStockDisplay";
@@ -74,6 +74,8 @@ export default function StyleDetailPage() {
   const [reserveErrors, setReserveErrors] = useState<{ name?: string; phone?: string }>({});
   const [reserving, setReserving] = useState(false);
   const createReservation = useMutation(api.reservations.reservations.createReservationPublic);
+  const addToCart = useMutation(api.storefront.cart.addToCart);
+  const [addingToCart, setAddingToCart] = useState(false);
 
   // Extract unique colors (memoized to avoid recreating on every render)
   const uniqueColors = useMemo(
@@ -305,6 +307,16 @@ export default function StyleDetailPage() {
                 </div>
               )}
             </>
+          ) : style.brandLogoUrl ? (
+            <div className="relative flex aspect-[3/4] w-full items-center justify-center bg-muted">
+              <Image
+                src={style.brandLogoUrl}
+                alt={style.brandName}
+                fill
+                sizes="(max-width: 768px) 100vw, 50vw"
+                className="object-contain p-12"
+              />
+            </div>
           ) : (
             <div className="flex aspect-[3/4] w-full items-center justify-center bg-muted text-muted-foreground">
               No images available
@@ -405,7 +417,29 @@ export default function StyleDetailPage() {
             </div>
           )}
 
-          {/* Notify Me — out of stock placeholder */}
+          {/* Add to Cart */}
+          {selectedVariantId && !isOutOfStock && (
+            <button
+              onClick={async () => {
+                setAddingToCart(true);
+                try {
+                  await addToCart({ variantId: selectedVariantId });
+                  toast.success("Added to bag!");
+                } catch {
+                  toast.error("Please sign in to add items to your bag");
+                } finally {
+                  setAddingToCart(false);
+                }
+              }}
+              disabled={addingToCart}
+              className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-md bg-primary text-sm font-bold uppercase tracking-wider text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              <ShoppingBag className="h-4 w-4" />
+              {addingToCart ? "Adding..." : "Add to Bag"}
+            </button>
+          )}
+
+          {/* Notify Me — out of stock */}
           {isOutOfStock && (
             <button
               onClick={() =>

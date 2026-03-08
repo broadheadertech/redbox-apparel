@@ -134,7 +134,7 @@ function formatPromoValue(promo: {
 
 // ─── Form State ─────────────────────────────────────────────────────────────
 
-type GenderValue = "mens" | "womens" | "unisex" | "kids";
+type GenderValue = "mens" | "womens" | "unisex" | "kids" | "boys" | "girls";
 
 interface PromoForm {
   name: string;
@@ -1138,10 +1138,12 @@ export default function PromotionsPage() {
                     <p className="text-xs font-medium text-muted-foreground">Genders</p>
                     <div className="border rounded-md p-3 flex flex-wrap gap-3">
                       {([
-                        { value: "mens" as const, label: "Mens" },
-                        { value: "womens" as const, label: "Womens" },
+                        { value: "mens" as const, label: "Men" },
+                        { value: "womens" as const, label: "Women" },
                         { value: "unisex" as const, label: "Unisex" },
                         { value: "kids" as const, label: "Kids" },
+                        { value: "boys" as const, label: "Boys" },
+                        { value: "girls" as const, label: "Girls" },
                       ]).map((g) => (
                         <label key={g.value} className="flex items-center gap-2 text-sm cursor-pointer">
                           <input

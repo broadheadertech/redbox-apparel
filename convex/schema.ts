@@ -56,6 +56,8 @@ export default defineSchema({
     name: v.string(),
     logo: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
+    bannerStorageId: v.optional(v.id("_storage")),
+    tags: v.optional(v.array(v.string())),
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -64,6 +66,8 @@ export default defineSchema({
   categories: defineTable({
     brandId: v.id("brands"),
     name: v.string(),
+    tag: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -91,7 +95,9 @@ export default defineSchema({
         v.literal("mens"),
         v.literal("womens"),
         v.literal("unisex"),
-        v.literal("kids")
+        v.literal("kids"),
+        v.literal("boys"),
+        v.literal("girls")
       )
     ),
     priceCentavos: v.number(),
@@ -475,7 +481,7 @@ export default defineSchema({
     // extended scoping (all optional — empty/undefined = all)
     styleIds: v.optional(v.array(v.id("styles"))),
     genders: v.optional(
-      v.array(v.union(v.literal("mens"), v.literal("womens"), v.literal("unisex"), v.literal("kids")))
+      v.array(v.union(v.literal("mens"), v.literal("womens"), v.literal("unisex"), v.literal("kids"), v.literal("boys"), v.literal("girls")))
     ),
     colors: v.optional(v.array(v.string())),
     sizes: v.optional(v.array(v.string())),
@@ -518,4 +524,315 @@ export default defineSchema({
     value: v.string(),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STOREFRONT / CUSTOMER-FACING TABLES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─── Customer Accounts ─────────────────────────────────────────────────────
+  customers: defineTable({
+    clerkId: v.string(),
+    email: v.string(),
+    firstName: v.string(),
+    lastName: v.string(),
+    phone: v.optional(v.string()),
+    avatarUrl: v.optional(v.string()),
+    gender: v.optional(
+      v.union(v.literal("male"), v.literal("female"), v.literal("other"))
+    ),
+    dateOfBirth: v.optional(v.string()), // ISO date string
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_clerkId", ["clerkId"])
+    .index("by_email", ["email"]),
+
+  // ─── Customer Addresses ────────────────────────────────────────────────────
+  customerAddresses: defineTable({
+    customerId: v.id("customers"),
+    label: v.string(), // "Home", "Office", etc.
+    recipientName: v.string(),
+    phone: v.string(),
+    addressLine1: v.string(),
+    addressLine2: v.optional(v.string()),
+    city: v.string(),
+    province: v.string(),
+    postalCode: v.string(),
+    country: v.string(),
+    isDefault: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_customer", ["customerId"]),
+
+  // ─── Shopping Cart ─────────────────────────────────────────────────────────
+  carts: defineTable({
+    customerId: v.id("customers"),
+    updatedAt: v.number(),
+  })
+    .index("by_customer", ["customerId"]),
+
+  cartItems: defineTable({
+    cartId: v.id("carts"),
+    variantId: v.id("variants"),
+    quantity: v.number(),
+    addedAt: v.number(),
+  })
+    .index("by_cart", ["cartId"])
+    .index("by_cart_variant", ["cartId", "variantId"]),
+
+  // ─── Online Orders ─────────────────────────────────────────────────────────
+  orders: defineTable({
+    customerId: v.id("customers"),
+    orderNumber: v.string(),
+    status: v.union(
+      v.literal("pending"),        // awaiting payment
+      v.literal("paid"),           // payment confirmed
+      v.literal("processing"),     // being prepared
+      v.literal("shipped"),        // handed to courier
+      v.literal("delivered"),      // received by customer
+      v.literal("cancelled"),      // cancelled by customer or admin
+      v.literal("returned"),       // return processed
+      v.literal("refunded")        // refund issued
+    ),
+    // pricing
+    subtotalCentavos: v.number(),
+    vatAmountCentavos: v.number(),
+    shippingFeeCentavos: v.number(),
+    discountAmountCentavos: v.number(),
+    totalCentavos: v.number(),
+    // delivery
+    shippingAddressId: v.optional(v.id("customerAddresses")),
+    shippingAddress: v.optional(v.object({
+      recipientName: v.string(),
+      phone: v.string(),
+      addressLine1: v.string(),
+      addressLine2: v.optional(v.string()),
+      city: v.string(),
+      province: v.string(),
+      postalCode: v.string(),
+      country: v.string(),
+    })),
+    // payment
+    paymentMethod: v.union(
+      v.literal("cod"),
+      v.literal("gcash"),
+      v.literal("maya"),
+      v.literal("card"),
+      v.literal("bankTransfer")
+    ),
+    paymentReference: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
+    // promo
+    promotionId: v.optional(v.id("promotions")),
+    voucherCode: v.optional(v.string()),
+    promoDiscountCentavos: v.optional(v.number()),
+    // fulfillment
+    fulfilledFromBranchId: v.optional(v.id("branches")),
+    notes: v.optional(v.string()),
+    // timestamps
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    cancelledAt: v.optional(v.number()),
+    cancelReason: v.optional(v.string()),
+  })
+    .index("by_customer", ["customerId"])
+    .index("by_status", ["status"])
+    .index("by_orderNumber", ["orderNumber"])
+    .index("by_createdAt", ["createdAt"]),
+
+  orderItems: defineTable({
+    orderId: v.id("orders"),
+    variantId: v.id("variants"),
+    quantity: v.number(),
+    unitPriceCentavos: v.number(),
+    lineTotalCentavos: v.number(),
+  })
+    .index("by_order", ["orderId"]),
+
+  // ─── Shipments / Delivery Tracking ─────────────────────────────────────────
+  shipments: defineTable({
+    orderId: v.id("orders"),
+    carrier: v.string(), // "J&T", "LBC", "Ninja Van", etc.
+    trackingNumber: v.optional(v.string()),
+    status: v.union(
+      v.literal("preparing"),
+      v.literal("pickedUp"),
+      v.literal("inTransit"),
+      v.literal("outForDelivery"),
+      v.literal("delivered"),
+      v.literal("failed")
+    ),
+    estimatedDelivery: v.optional(v.number()),
+    shippedAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_order", ["orderId"])
+    .index("by_trackingNumber", ["trackingNumber"]),
+
+  // ─── Wishlist ──────────────────────────────────────────────────────────────
+  wishlists: defineTable({
+    customerId: v.id("customers"),
+    variantId: v.id("variants"),
+    addedAt: v.number(),
+  })
+    .index("by_customer", ["customerId"])
+    .index("by_customer_variant", ["customerId", "variantId"]),
+
+  // ─── Product Reviews ───────────────────────────────────────────────────────
+  reviews: defineTable({
+    customerId: v.id("customers"),
+    styleId: v.id("styles"),
+    orderId: v.optional(v.id("orders")), // verified purchase
+    rating: v.number(), // 1-5
+    title: v.optional(v.string()),
+    body: v.optional(v.string()),
+    imageStorageIds: v.optional(v.array(v.id("_storage"))),
+    // moderation
+    isVerifiedPurchase: v.boolean(),
+    isApproved: v.boolean(),
+    // helpful votes
+    helpfulCount: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_style", ["styleId"])
+    .index("by_customer", ["customerId"])
+    .index("by_style_approved", ["styleId", "isApproved"]),
+
+  // ─── Voucher Codes ─────────────────────────────────────────────────────────
+  vouchers: defineTable({
+    code: v.string(),
+    promotionId: v.id("promotions"),
+    // usage limits
+    usageLimit: v.optional(v.number()),    // total redemptions allowed
+    usedCount: v.number(),
+    perCustomerLimit: v.optional(v.number()), // max per customer
+    // minimum spend
+    minOrderCentavos: v.optional(v.number()),
+    // validity
+    startDate: v.number(),
+    endDate: v.optional(v.number()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_code", ["code"])
+    .index("by_promotion", ["promotionId"]),
+
+  voucherRedemptions: defineTable({
+    voucherId: v.id("vouchers"),
+    customerId: v.id("customers"),
+    orderId: v.id("orders"),
+    redeemedAt: v.number(),
+  })
+    .index("by_voucher", ["voucherId"])
+    .index("by_customer_voucher", ["customerId", "voucherId"]),
+
+  // ─── Loyalty Program ───────────────────────────────────────────────────────
+  loyaltyAccounts: defineTable({
+    customerId: v.id("customers"),
+    tier: v.union(
+      v.literal("bronze"),
+      v.literal("silver"),
+      v.literal("gold"),
+      v.literal("platinum")
+    ),
+    pointsBalance: v.number(),
+    lifetimePoints: v.number(),
+    lifetimeSpendCentavos: v.number(),
+    tierExpiresAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_customer", ["customerId"])
+    .index("by_tier", ["tier"]),
+
+  loyaltyTransactions: defineTable({
+    loyaltyAccountId: v.id("loyaltyAccounts"),
+    type: v.union(
+      v.literal("earn"),        // from purchase
+      v.literal("redeem"),      // used as discount
+      v.literal("expire"),      // points expired
+      v.literal("bonus"),       // admin bonus / promo
+      v.literal("adjustment")   // manual correction
+    ),
+    points: v.number(), // positive for earn/bonus, negative for redeem/expire
+    orderId: v.optional(v.id("orders")),
+    description: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_account", ["loyaltyAccountId"])
+    .index("by_account_type", ["loyaltyAccountId", "type"]),
+
+  // ─── Notifications ─────────────────────────────────────────────────────────
+  notifications: defineTable({
+    customerId: v.id("customers"),
+    type: v.union(
+      v.literal("order"),         // order status update
+      v.literal("promo"),         // promotion / flash sale
+      v.literal("restock"),       // wishlist item back in stock
+      v.literal("price_drop"),    // wishlist item price dropped
+      v.literal("system")         // general announcement
+    ),
+    title: v.string(),
+    body: v.string(),
+    linkUrl: v.optional(v.string()),
+    isRead: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_customer", ["customerId"])
+    .index("by_customer_read", ["customerId", "isRead"])
+    .index("by_createdAt", ["createdAt"]),
+
+  // ─── Recently Viewed ───────────────────────────────────────────────────────
+  recentlyViewed: defineTable({
+    customerId: v.id("customers"),
+    styleId: v.id("styles"),
+    viewedAt: v.number(),
+  })
+    .index("by_customer", ["customerId"])
+    .index("by_customer_style", ["customerId", "styleId"]),
+
+  // ─── Size Charts ───────────────────────────────────────────────────────────
+  sizeCharts: defineTable({
+    categoryId: v.id("categories"),
+    sizeGroup: v.string(), // "Apparel", "EU", "US", etc.
+    entries: v.array(v.object({
+      size: v.string(),          // "S", "M", "L", "42", etc.
+      chest: v.optional(v.string()),
+      waist: v.optional(v.string()),
+      hips: v.optional(v.string()),
+      length: v.optional(v.string()),
+      shoulder: v.optional(v.string()),
+      footLength: v.optional(v.string()),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_category", ["categoryId"])
+    .index("by_category_sizeGroup", ["categoryId", "sizeGroup"]),
+
+  // ─── Banners / Homepage Content ────────────────────────────────────────────
+  banners: defineTable({
+    title: v.string(),
+    subtitle: v.optional(v.string()),
+    imageStorageId: v.id("_storage"),
+    linkUrl: v.optional(v.string()),
+    placement: v.union(
+      v.literal("hero"),         // main homepage carousel
+      v.literal("category"),     // category page banner
+      v.literal("flash_sale"),   // flash sale section
+      v.literal("promo")         // promotional strip
+    ),
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    startDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_placement", ["placement"])
+    .index("by_active_placement", ["isActive", "placement"]),
 });

@@ -52,7 +52,9 @@ export const createVariant = mutation({
         v.literal("mens"),
         v.literal("womens"),
         v.literal("unisex"),
-        v.literal("kids")
+        v.literal("kids"),
+        v.literal("boys"),
+        v.literal("girls")
       )
     ),
     priceCentavos: v.number(),
@@ -170,7 +172,9 @@ export const updateVariant = mutation({
         v.literal("mens"),
         v.literal("womens"),
         v.literal("unisex"),
-        v.literal("kids")
+        v.literal("kids"),
+        v.literal("boys"),
+        v.literal("girls")
       )
     ),
     clearGender: v.optional(v.boolean()),

@@ -1,34 +1,27 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { Id } from "@/convex/_generated/dataModel";
 import {
   ArrowLeft,
   ArrowUpDown,
   SlidersHorizontal,
-  X,
+  Search,
   Check,
   ChevronRight,
+  X,
 } from "lucide-react";
 import { CustomerProductCard } from "@/components/customer/CustomerProductCard";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type GenderTab = "all" | "womens" | "mens" | "kids";
+type GenderKey = "mens" | "womens" | "kids";
 type SortKey = "newest" | "price_asc" | "price_desc" | "name_asc";
-
-const GENDER_TABS: { key: GenderTab; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "womens", label: "Women" },
-  { key: "mens", label: "Men" },
-  { key: "kids", label: "Kids" },
-];
+type FilterSection = "brand" | "category" | "color" | "size";
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "newest", label: "Latest Arrival" },
@@ -37,54 +30,63 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "name_asc", label: "Name A-Z" },
 ];
 
-function matchesGender(genders: string[], tab: GenderTab): boolean {
-  if (tab === "all") return true;
-  if (genders.includes(tab)) return true;
-  if (tab === "kids") {
-    return genders.includes("boys") || genders.includes("girls");
+const GENDER_LABELS: Record<GenderKey, string> = {
+  mens: "Men\u2019s",
+  womens: "Women\u2019s",
+  kids: "Kids\u2019",
+};
+
+function matchesGender(genders: string[], gender: GenderKey): boolean {
+  if (genders.includes(gender)) return true;
+  if (gender === "kids") {
+    return (
+      genders.includes("boys") ||
+      genders.includes("girls") ||
+      genders.includes("kids")
+    );
   }
   if (genders.includes("unisex")) return true;
   return false;
 }
 
-// ─── Filter panel sections ───────────────────────────────────────────────────
-
-type FilterSection = "category" | "color" | "size";
-
 // ─── Page ────────────────────────────────────────────────────────────────────
 
-export default function BrandPage() {
+export default function TagProductsPage() {
   const params = useParams();
-  const brandId = params.brandId as Id<"brands">;
+  const searchParams = useSearchParams();
 
-  const data = useQuery(
-    api.catalog.publicBrowse.getAllStylesForBrandPublic,
-    { brandId }
-  );
+  const tag = decodeURIComponent(params.tag as string);
+  const gender = (searchParams.get("gender") as GenderKey) ?? "mens";
+  const initialCategory = searchParams.get("category") ?? null;
+
+  const data = useQuery(api.catalog.publicBrowse.getStylesByTagPublic, { tag });
 
   // UI state
-  const [genderTab, setGenderTab] = useState<GenderTab>("all");
+  const [activeTab, setActiveTab] = useState<string | null>(initialCategory);
   const [sortKey, setSortKey] = useState<SortKey>("newest");
   const [showSort, setShowSort] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [filterSection, setFilterSection] = useState<FilterSection | null>(null);
 
   // Filter state
-  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+  const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedColors, setSelectedColors] = useState<Set<string>>(new Set());
   const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set());
 
   const activeFilterCount =
-    selectedCategories.size + selectedColors.size + selectedSizes.size;
+    selectedBrands.size + selectedColors.size + selectedSizes.size;
 
   const clearFilters = useCallback(() => {
-    setSelectedCategories(new Set());
+    setSelectedBrands(new Set());
     setSelectedColors(new Set());
     setSelectedSizes(new Set());
   }, []);
 
   const toggleInSet = useCallback(
-    (setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) => {
+    (
+      setter: React.Dispatch<React.SetStateAction<Set<string>>>,
+      value: string
+    ) => {
       setter((prev) => {
         const next = new Set(prev);
         if (next.has(value)) next.delete(value);
@@ -95,29 +97,44 @@ export default function BrandPage() {
     []
   );
 
-  // Filtered + sorted styles
-  const filteredStyles = useMemo(() => {
+  // Gender-filtered styles first
+  const genderStyles = useMemo(() => {
     if (!data) return [];
-    let styles = data.styles;
+    return data.styles.filter((s) => matchesGender(s.genders, gender));
+  }, [data, gender]);
 
-    // Gender filter
-    if (genderTab !== "all") {
-      styles = styles.filter((s) => matchesGender(s.genders, genderTab));
+  // Category tabs from gender-filtered styles
+  const categoryTabs = useMemo(() => {
+    const names = [...new Set(genderStyles.map((s) => s.categoryName))].sort();
+    return names;
+  }, [genderStyles]);
+
+  // Full filtered + sorted list
+  const filteredStyles = useMemo(() => {
+    let styles = genderStyles;
+
+    // Category tab filter
+    if (activeTab) {
+      styles = styles.filter((s) => s.categoryName === activeTab);
     }
 
-    // Category filter
-    if (selectedCategories.size > 0) {
-      styles = styles.filter((s) => selectedCategories.has(s.categoryName));
+    // Brand filter
+    if (selectedBrands.size > 0) {
+      styles = styles.filter((s) => selectedBrands.has(s.brandName));
     }
 
     // Color filter
     if (selectedColors.size > 0) {
-      styles = styles.filter((s) => s.colors.some((c) => selectedColors.has(c)));
+      styles = styles.filter((s) =>
+        s.colors.some((c) => selectedColors.has(c))
+      );
     }
 
     // Size filter
     if (selectedSizes.size > 0) {
-      styles = styles.filter((s) => s.sizes.some((sz) => selectedSizes.has(sz)));
+      styles = styles.filter((s) =>
+        s.sizes.some((sz) => selectedSizes.has(sz))
+      );
     }
 
     // Sort
@@ -138,126 +155,111 @@ export default function BrandPage() {
     }
 
     return sorted;
-  }, [data, genderTab, sortKey, selectedCategories, selectedColors, selectedSizes]);
+  }, [genderStyles, activeTab, sortKey, selectedBrands, selectedColors, selectedSizes]);
+
+  const genderLabel = GENDER_LABELS[gender] ?? "";
+  const viewAllLabel = `${genderLabel} ${tag}`;
 
   // ── Loading ──
   if (data === undefined) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-6">
-        <div className="h-40 animate-pulse rounded-xl bg-secondary sm:h-52" />
-        <div className="mt-4 flex gap-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-8 w-16 animate-pulse rounded bg-secondary" />
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-6 w-6 animate-pulse rounded bg-secondary" />
+          <div className="h-8 flex-1 animate-pulse rounded-full bg-secondary" />
+        </div>
+        <div className="flex gap-3 mb-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-8 w-24 animate-pulse rounded bg-secondary"
+            />
           ))}
         </div>
-        <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-64 animate-pulse rounded-lg border border-border bg-secondary" />
+            <div
+              key={i}
+              className="h-64 animate-pulse rounded-lg border border-border bg-secondary"
+            />
           ))}
         </div>
       </div>
     );
   }
 
-  // ── Not found ──
   if (data === null) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-12 text-center">
-        <p className="text-muted-foreground">Brand not found.</p>
+        <p className="text-muted-foreground">No products found for "{tag}".</p>
         <Link
-          href="/browse"
+          href="/categories"
           className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to brands
+          Back to categories
         </Link>
       </div>
     );
   }
 
-  const { brand, filters } = data;
+  const { filters } = data;
 
   return (
     <>
       <div className="mx-auto max-w-7xl">
-        {/* ── Banner / Header ── */}
-        <div className="relative h-40 w-full overflow-hidden sm:h-52">
-          {brand.bannerUrl ? (
-            <Image
-              src={brand.bannerUrl}
-              alt={`${brand.name} banner`}
-              fill
-              sizes="(max-width: 1280px) 100vw, 1280px"
-              className="object-cover"
-              priority
-            />
-          ) : brand.brandLogoUrl ? (
-            <div className="flex h-full w-full items-center justify-center bg-muted">
-              <div className="relative h-24 w-48">
-                <Image
-                  src={brand.brandLogoUrl}
-                  alt={brand.name}
-                  fill
-                  sizes="192px"
-                  className="object-contain"
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-muted">
-              <span className="font-display text-4xl font-bold text-muted-foreground/30 uppercase">
-                {brand.name}
-              </span>
-            </div>
-          )}
-          {brand.bannerUrl && (
-            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-          )}
-          {/* Brand logo overlay centered */}
-          {brand.bannerUrl && brand.brandLogoUrl && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="relative h-16 w-32 drop-shadow-lg">
-                <Image
-                  src={brand.brandLogoUrl}
-                  alt={brand.name}
-                  fill
-                  sizes="128px"
-                  className="object-contain"
-                />
-              </div>
-            </div>
-          )}
-          {/* Back button */}
+        {/* ── Header with search bar ── */}
+        <div className="flex items-center gap-3 px-4 py-3">
           <Link
-            href="/browse"
-            className="absolute left-3 top-3 flex h-9 w-9 items-center justify-center rounded-md bg-white/80 text-foreground backdrop-blur-sm hover:bg-white"
+            href={`/categories/${encodeURIComponent(tag)}?gender=${gender}`}
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center text-foreground"
             aria-label="Back"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-5 w-5" />
           </Link>
+          <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-secondary/50 px-4 py-2">
+            <Search className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">{tag}</span>
+          </div>
         </div>
 
-        {/* ── Gender tabs ── */}
-        <div className="border-b border-border">
-          <div className="flex px-4">
-            {GENDER_TABS.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setGenderTab(tab.key)}
-                className={cn(
-                  "relative px-4 py-3 text-sm font-medium transition-colors",
-                  genderTab === tab.key
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {tab.label}
-                {genderTab === tab.key && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground" />
-                )}
-              </button>
-            ))}
-          </div>
+        {/* ── Category tabs ── */}
+        <div
+          className="flex gap-0 overflow-x-auto border-b border-border px-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        >
+          {/* View All tab */}
+          <button
+            onClick={() => setActiveTab(null)}
+            className={cn(
+              "relative flex-shrink-0 whitespace-nowrap px-4 py-3 text-sm font-medium transition-colors",
+              activeTab === null
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {viewAllLabel}
+            {activeTab === null && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground" />
+            )}
+          </button>
+
+          {categoryTabs.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveTab(cat)}
+              className={cn(
+                "relative flex-shrink-0 whitespace-nowrap px-4 py-3 text-sm font-medium transition-colors",
+                activeTab === cat
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {cat}
+              {activeTab === cat && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground" />
+              )}
+            </button>
+          ))}
         </div>
 
         {/* ── Sort / Filter / Count bar ── */}
@@ -271,7 +273,10 @@ export default function BrandPage() {
           </button>
           <div className="h-5 w-px bg-border" />
           <button
-            onClick={() => { setShowFilter(true); setFilterSection(null); }}
+            onClick={() => {
+              setShowFilter(true);
+              setFilterSection(null);
+            }}
             className="relative flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-foreground"
           >
             <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -302,10 +307,10 @@ export default function BrandPage() {
                   key={style._id}
                   styleId={style._id}
                   name={style.name}
-                  brandName={brand.name}
+                  brandName={style.brandName}
                   priceCentavos={style.basePriceCentavos}
                   imageUrl={style.primaryImageUrl}
-                  brandLogoUrl={brand.brandLogoUrl}
+                  brandLogoUrl={style.brandLogoUrl}
                   variantCount={style.variantCount}
                   branchCount={style.branchCount}
                   sizes={style.sizes}
@@ -327,19 +332,23 @@ export default function BrandPage() {
             <div className="flex items-center justify-center pt-3 pb-1">
               <div className="h-1 w-10 rounded-full bg-muted-foreground/30" />
             </div>
-            <h3 className="px-5 pb-2 text-center text-base font-semibold">Sort</h3>
+            <h3 className="px-5 pb-2 text-center text-base font-semibold">
+              Sort
+            </h3>
             <div className="divide-y divide-border">
               {SORT_OPTIONS.map((opt) => (
                 <button
                   key={opt.key}
-                  onClick={() => { setSortKey(opt.key); setShowSort(false); }}
+                  onClick={() => {
+                    setSortKey(opt.key);
+                    setShowSort(false);
+                  }}
                   className="flex w-full items-center justify-between px-5 py-3.5 text-sm text-foreground transition-colors hover:bg-secondary"
                 >
                   {opt.label}
-                  {sortKey === opt.key && (
+                  {sortKey === opt.key ? (
                     <span className="h-4 w-4 rounded-full border-[5px] border-foreground" />
-                  )}
-                  {sortKey !== opt.key && (
+                  ) : (
                     <span className="h-4 w-4 rounded-full border-2 border-muted-foreground/40" />
                   )}
                 </button>
@@ -365,65 +374,35 @@ export default function BrandPage() {
           <div className="flex h-[calc(100vh-60px-64px)]">
             {/* Left sidebar */}
             <div className="w-40 flex-shrink-0 overflow-y-auto border-r border-border bg-muted/30">
-              <button
-                onClick={() => setFilterSection("category")}
-                className={cn(
-                  "flex w-full items-center justify-between px-4 py-3.5 text-left text-sm",
-                  filterSection === "category"
-                    ? "bg-card font-semibold text-foreground"
-                    : "text-muted-foreground"
-                )}
-              >
-                <span>
-                  Category
-                  {selectedCategories.size > 0 && (
-                    <span className="ml-1 text-xs text-primary">
-                      {selectedCategories.size}
-                    </span>
+              {(
+                [
+                  { key: "brand" as FilterSection, label: "Brand", count: selectedBrands.size },
+                  { key: "category" as FilterSection, label: "Category", count: 0 },
+                  { key: "color" as FilterSection, label: "Color", count: selectedColors.size },
+                  { key: "size" as FilterSection, label: "Size", count: selectedSizes.size },
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => setFilterSection(item.key)}
+                  className={cn(
+                    "flex w-full items-center justify-between px-4 py-3.5 text-left text-sm",
+                    filterSection === item.key
+                      ? "bg-card font-semibold text-foreground"
+                      : "text-muted-foreground"
                   )}
-                </span>
-                <ChevronRight className="h-3 w-3" />
-              </button>
-
-              <button
-                onClick={() => setFilterSection("color")}
-                className={cn(
-                  "flex w-full items-center justify-between px-4 py-3.5 text-left text-sm",
-                  filterSection === "color"
-                    ? "bg-card font-semibold text-foreground"
-                    : "text-muted-foreground"
-                )}
-              >
-                <span>
-                  Color
-                  {selectedColors.size > 0 && (
-                    <span className="ml-1 text-xs text-primary">
-                      {selectedColors.size}
-                    </span>
-                  )}
-                </span>
-                <ChevronRight className="h-3 w-3" />
-              </button>
-
-              <button
-                onClick={() => setFilterSection("size")}
-                className={cn(
-                  "flex w-full items-center justify-between px-4 py-3.5 text-left text-sm",
-                  filterSection === "size"
-                    ? "bg-card font-semibold text-foreground"
-                    : "text-muted-foreground"
-                )}
-              >
-                <span>
-                  Size
-                  {selectedSizes.size > 0 && (
-                    <span className="ml-1 text-xs text-primary">
-                      {selectedSizes.size}
-                    </span>
-                  )}
-                </span>
-                <ChevronRight className="h-3 w-3" />
-              </button>
+                >
+                  <span>
+                    {item.label}
+                    {item.count > 0 && (
+                      <span className="ml-1 text-xs text-primary">
+                        {item.count}
+                      </span>
+                    )}
+                  </span>
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+              ))}
             </div>
 
             {/* Right content */}
@@ -434,21 +413,45 @@ export default function BrandPage() {
                 </p>
               )}
 
+              {filterSection === "brand" && (
+                <div className="space-y-1">
+                  {filters.brands.map((b) => (
+                    <button
+                      key={b}
+                      onClick={() => toggleInSet(setSelectedBrands, b)}
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors",
+                        selectedBrands.has(b)
+                          ? "bg-primary/10 font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-secondary"
+                      )}
+                    >
+                      {b}
+                      {selectedBrands.has(b) && (
+                        <Check className="h-4 w-4 text-primary" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {filterSection === "category" && (
                 <div className="space-y-1">
                   {filters.categories.map((cat) => (
                     <button
                       key={cat}
-                      onClick={() => toggleInSet(setSelectedCategories, cat)}
+                      onClick={() => setActiveTab(cat === activeTab ? null : cat)}
                       className={cn(
                         "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors",
-                        selectedCategories.has(cat)
+                        activeTab === cat
                           ? "bg-primary/10 font-medium text-foreground"
                           : "text-muted-foreground hover:bg-secondary"
                       )}
                     >
                       {cat}
-                      {selectedCategories.has(cat) && <Check className="h-4 w-4 text-primary" />}
+                      {activeTab === cat && (
+                        <Check className="h-4 w-4 text-primary" />
+                      )}
                     </button>
                   ))}
                 </div>

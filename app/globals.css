@@ -132,3 +132,12 @@
 .animate-pulse-stock {
   animation: stockPulse 500ms ease-out forwards;
 }
+
+/* Hide scrollbar for horizontal scroll rows */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

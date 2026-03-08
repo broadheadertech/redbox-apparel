@@ -46,14 +46,23 @@ import {
   ImageIcon,
   Trash2,
   Loader2,
+  X,
 } from "lucide-react";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
 
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+const AVAILABLE_TAGS = [
+  "Streetwear",
+  "Sports",
+  "Luxury",
+  "Casual",
+  "Essentials",
+] as const;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
-type BrandListItem = Brand & { imageUrl: string | null };
+type BrandListItem = Brand & { imageUrl: string | null; bannerUrl: string | null };
 
 export default function CatalogPage() {
   const brands = useQuery(api.catalog.brands.listBrands) as BrandListItem[] | undefined;
@@ -64,6 +73,8 @@ export default function CatalogPage() {
   const generateUploadUrl = useMutation(api.catalog.images.generateUploadUrl);
   const saveBrandImage = useMutation(api.catalog.brands.saveBrandImage);
   const deleteBrandImage = useMutation(api.catalog.brands.deleteBrandImage);
+  const saveBrandBanner = useMutation(api.catalog.brands.saveBrandBanner);
+  const deleteBrandBanner = useMutation(api.catalog.brands.deleteBrandBanner);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -71,7 +82,7 @@ export default function CatalogPage() {
 
   // Create dialog state
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "" });
+  const [createForm, setCreateForm] = useState({ name: "", tags: [] as string[] });
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
   const [createPendingFile, setCreatePendingFile] = useState<File | null>(null);
   const [createPreviewUrl, setCreatePreviewUrl] = useState<string | null>(null);
@@ -79,10 +90,12 @@ export default function CatalogPage() {
 
   // Edit dialog state
   const [editingBrand, setEditingBrand] = useState<BrandListItem | null>(null);
-  const [editForm, setEditForm] = useState({ name: "" });
+  const [editForm, setEditForm] = useState({ name: "", tags: [] as string[] });
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [isUploadingEditImage, setIsUploadingEditImage] = useState(false);
+  const [isUploadingBanner, setIsUploadingBanner] = useState(false);
   const editFileRef = useRef<HTMLInputElement>(null);
+  const bannerFileRef = useRef<HTMLInputElement>(null);
 
   // Filter brands
   const filteredBrands = brands?.filter((brand) => {
@@ -101,7 +114,7 @@ export default function CatalogPage() {
   // ─── Create dialog helpers ──────────────────────────────────────────────────
 
   const resetCreateForm = () => {
-    setCreateForm({ name: "" });
+    setCreateForm({ name: "", tags: [] });
     setCreateErrors({});
     setCreatePendingFile(null);
     if (createPreviewUrl) URL.revokeObjectURL(createPreviewUrl);
@@ -136,7 +149,10 @@ export default function CatalogPage() {
 
     setIsSubmitting(true);
     try {
-      const brandId = await createBrand({ name: createForm.name.trim() });
+      const brandId = await createBrand({
+        name: createForm.name.trim(),
+        tags: createForm.tags.length > 0 ? createForm.tags : undefined,
+      });
 
       // Upload image if one was selected
       if (createPendingFile) {
@@ -164,7 +180,7 @@ export default function CatalogPage() {
 
   const openEditDialog = (brand: BrandListItem) => {
     setEditingBrand(brand);
-    setEditForm({ name: brand.name });
+    setEditForm({ name: brand.name, tags: brand.tags ?? [] });
     setEditErrors({});
   };
 
@@ -183,6 +199,7 @@ export default function CatalogPage() {
       await updateBrand({
         brandId: editingBrand._id,
         name: editForm.name.trim(),
+        tags: editForm.tags,
       });
       toast.success("Brand updated successfully");
       setEditingBrand(null);
@@ -236,6 +253,51 @@ export default function CatalogPage() {
       toast.error(`Failed to remove image: ${getErrorMessage(error)}`);
     } finally {
       setIsUploadingEditImage(false);
+    }
+  };
+
+  const handleBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingBrand) return;
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      toast.error("Invalid file type. Please upload JPEG, PNG, or WebP.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error("File too large. Maximum size is 5MB.");
+      return;
+    }
+
+    setIsUploadingBanner(true);
+    try {
+      const uploadUrl = await generateUploadUrl();
+      const result = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      const { storageId } = await result.json();
+      await saveBrandBanner({ brandId: editingBrand._id, storageId });
+      toast.success("Banner image updated");
+    } catch (error) {
+      toast.error(`Failed to upload banner: ${getErrorMessage(error)}`);
+    } finally {
+      setIsUploadingBanner(false);
+      if (bannerFileRef.current) bannerFileRef.current.value = "";
+    }
+  };
+
+  const handleBannerDelete = async () => {
+    if (!editingBrand) return;
+
+    setIsUploadingBanner(true);
+    try {
+      await deleteBrandBanner({ brandId: editingBrand._id });
+      toast.success("Banner removed");
+    } catch (error) {
+      toast.error(`Failed to remove banner: ${getErrorMessage(error)}`);
+    } finally {
+      setIsUploadingBanner(false);
     }
   };
 
@@ -327,6 +389,7 @@ export default function CatalogPage() {
             <TableRow>
               <TableHead>Brand</TableHead>
               <TableHead>Image</TableHead>
+              <TableHead>Tags</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -363,6 +426,19 @@ export default function CatalogPage() {
                     ) : (
                       <span className="text-xs text-muted-foreground">None</span>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {(brand.tags ?? []).length > 0 ? (
+                        brand.tags!.map((tag: string) => (
+                          <Badge key={tag} variant="outline" className="text-xs">
+                            {tag}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-muted-foreground">&mdash;</span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge
@@ -407,7 +483,7 @@ export default function CatalogPage() {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={4}
+                  colSpan={5}
                   className="text-center text-muted-foreground py-8"
                 >
                   {searchQuery || statusFilter !== "all"
@@ -454,7 +530,7 @@ export default function CatalogPage() {
                 placeholder="e.g. Nike, Adidas"
                 value={createForm.name}
                 onChange={(e) => {
-                  setCreateForm({ name: e.target.value });
+                  setCreateForm((f) => ({ ...f, name: e.target.value }));
                   if (createErrors.name) {
                     setCreateErrors((prev) => {
                       const next = { ...prev };
@@ -524,6 +600,39 @@ export default function CatalogPage() {
                 JPEG, PNG, or WebP. Max 5MB.
               </p>
             </div>
+            <div className="space-y-2">
+              <Label>Tags</Label>
+              <div className="flex flex-wrap gap-2">
+                {AVAILABLE_TAGS.map((tag) => {
+                  const isSelected = createForm.tags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() =>
+                        setCreateForm((f) => ({
+                          ...f,
+                          tags: isSelected
+                            ? f.tags.filter((t) => t !== tag)
+                            : [...f.tags, tag],
+                        }))
+                      }
+                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                        isSelected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-transparent text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {tag}
+                      {isSelected && <X className="h-3 w-3" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Tags help customers filter products on the storefront
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -568,7 +677,7 @@ export default function CatalogPage() {
                 id="edit-name"
                 value={editForm.name}
                 onChange={(e) => {
-                  setEditForm({ name: e.target.value });
+                  setEditForm((f) => ({ ...f, name: e.target.value }));
                   if (editErrors.name) {
                     setEditErrors((prev) => {
                       const next = { ...prev };
@@ -647,6 +756,106 @@ export default function CatalogPage() {
               )}
               <p className="text-xs text-muted-foreground">
                 JPEG, PNG, or WebP. Max 5MB.
+              </p>
+            </div>
+            {/* Banner Image */}
+            <div className="space-y-2">
+              <Label>Banner Image</Label>
+              <input
+                ref={bannerFileRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleBannerUpload}
+              />
+              {editingBrand?.bannerUrl ? (
+                <div className="space-y-2">
+                  <img
+                    src={editingBrand.bannerUrl}
+                    alt={`${editingBrand.name} banner`}
+                    className="h-24 w-full rounded-lg object-cover border"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => bannerFileRef.current?.click()}
+                      disabled={isUploadingBanner}
+                    >
+                      {isUploadingBanner ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Replace"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleBannerDelete}
+                      disabled={isUploadingBanner}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => bannerFileRef.current?.click()}
+                  disabled={isUploadingBanner}
+                >
+                  {isUploadingBanner ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <ImageIcon className="mr-2 h-4 w-4" />
+                      Upload Banner
+                    </>
+                  )}
+                </Button>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Wide hero image for brand showcase. JPEG, PNG, or WebP. Max 5MB.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Tags</Label>
+              <div className="flex flex-wrap gap-2">
+                {AVAILABLE_TAGS.map((tag) => {
+                  const isSelected = editForm.tags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() =>
+                        setEditForm((f) => ({
+                          ...f,
+                          tags: isSelected
+                            ? f.tags.filter((t) => t !== tag)
+                            : [...f.tags, tag],
+                        }))
+                      }
+                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                        isSelected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-transparent text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {tag}
+                      {isSelected && <X className="h-3 w-3" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Tags help customers filter products on the storefront
               </p>
             </div>
           </div>

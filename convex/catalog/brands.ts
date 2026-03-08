@@ -17,6 +17,9 @@ export const listBrands = query({
         imageUrl: brand.storageId
           ? await ctx.storage.getUrl(brand.storageId)
           : null,
+        bannerUrl: brand.bannerStorageId
+          ? await ctx.storage.getUrl(brand.bannerStorageId)
+          : null,
       }))
     );
   },
@@ -36,6 +39,7 @@ export const createBrand = mutation({
   args: {
     name: v.string(),
     logo: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, HQ_ROLES);
@@ -55,6 +59,7 @@ export const createBrand = mutation({
     const brandId = await ctx.db.insert("brands", {
       name: args.name,
       logo: args.logo,
+      tags: args.tags,
       isActive: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -77,6 +82,7 @@ export const updateBrand = mutation({
     brandId: v.id("brands"),
     name: v.optional(v.string()),
     logo: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, HQ_ROLES);
@@ -108,6 +114,12 @@ export const updateBrand = mutation({
       before.name = existing.name;
       after.name = args.name;
       patch.name = args.name;
+    }
+
+    if (args.tags !== undefined) {
+      before.tags = existing.tags;
+      after.tags = args.tags;
+      patch.tags = args.tags;
     }
 
     // Empty string means "clear logo", undefined means "no change"
@@ -267,6 +279,78 @@ export const deleteBrandImage = mutation({
       entityId: args.brandId,
       before: { storageId: brand.storageId },
       after: { storageId: undefined },
+    });
+  },
+});
+
+// ─── Brand Banner ───────────────────────────────────────────────────────────
+
+export const saveBrandBanner = mutation({
+  args: {
+    brandId: v.id("brands"),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, HQ_ROLES);
+
+    const brand = await ctx.db.get(args.brandId);
+    if (!brand) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Brand not found" });
+    }
+
+    if (brand.bannerStorageId) {
+      await ctx.storage.delete(brand.bannerStorageId);
+    }
+
+    await ctx.db.patch(args.brandId, {
+      bannerStorageId: args.storageId,
+      updatedAt: Date.now(),
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "brand.bannerUpdate",
+      userId: user._id,
+      entityType: "brands",
+      entityId: args.brandId,
+      before: { bannerStorageId: brand.bannerStorageId },
+      after: { bannerStorageId: args.storageId },
+    });
+  },
+});
+
+export const deleteBrandBanner = mutation({
+  args: {
+    brandId: v.id("brands"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, HQ_ROLES);
+
+    const brand = await ctx.db.get(args.brandId);
+    if (!brand) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Brand not found" });
+    }
+
+    if (!brand.bannerStorageId) {
+      throw new ConvexError({
+        code: "NO_BANNER",
+        message: "Brand has no banner to delete",
+      });
+    }
+
+    await ctx.storage.delete(brand.bannerStorageId);
+
+    await ctx.db.patch(args.brandId, {
+      bannerStorageId: undefined,
+      updatedAt: Date.now(),
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "brand.bannerDelete",
+      userId: user._id,
+      entityType: "brands",
+      entityId: args.brandId,
+      before: { bannerStorageId: brand.bannerStorageId },
+      after: { bannerStorageId: undefined },
     });
   },
 });

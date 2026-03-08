@@ -34,10 +34,20 @@ export const getBrandWithCategoriesPublic = query({
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((c) => ({ _id: c._id, name: c.name }));
 
+    const brandLogoUrl = brand.storageId
+      ? await ctx.storage.getUrl(brand.storageId)
+      : null;
+
+    const bannerUrl = brand.bannerStorageId
+      ? await ctx.storage.getUrl(brand.bannerStorageId)
+      : null;
+
     return {
       _id: brand._id,
       name: brand.name,
       logo: brand.logo,
+      brandLogoUrl,
+      bannerUrl,
       categories: activeCategories,
     };
   },
@@ -97,11 +107,19 @@ export const getStylesByCategoryPublic = query({
           }
         }
 
+        // Resolve brand logo for fallback
+        const cat = await ctx.db.get(style.categoryId);
+        const brandDoc = cat ? await ctx.db.get(cat.brandId) : null;
+        const brandLogoUrl = brandDoc?.storageId
+          ? await ctx.storage.getUrl(brandDoc.storageId)
+          : null;
+
         return {
           _id: style._id,
           name: style.name,
           basePriceCentavos: style.basePriceCentavos,
           primaryImageUrl,
+          brandLogoUrl,
           variantCount: activeVariants.length,
           branchCount: branchSet.size,
           sizes: Array.from(sizeSet),
@@ -110,6 +128,241 @@ export const getStylesByCategoryPublic = query({
     );
 
     return enriched;
+  },
+});
+
+export const getStylesByTagPublic = query({
+  args: { tag: v.string() },
+  handler: async (ctx, args) => {
+    // Get all active categories with this tag
+    const allCategories = await ctx.db.query("categories").collect();
+    const tagCategories = allCategories.filter(
+      (c) => c.isActive && c.tag === args.tag
+    );
+    if (tagCategories.length === 0) return null;
+
+    // Pre-fetch warehouse IDs once
+    const allBranches = await ctx.db.query("branches").collect();
+    const warehouseIds = new Set(
+      allBranches.filter((b) => b.type === "warehouse").map((b) => b._id as string)
+    );
+
+    // Pre-fetch brands for brand name resolution
+    const allBrands = await ctx.db.query("brands").collect();
+    const brandMap = new Map(allBrands.map((b) => [String(b._id), b]));
+
+    // Gather all styles across all matching categories
+    const allStyles = await Promise.all(
+      tagCategories.map(async (cat) => {
+        const brand = brandMap.get(String(cat.brandId));
+        if (!brand || !brand.isActive) return [];
+        const styles = await ctx.db
+          .query("styles")
+          .withIndex("by_category", (q) => q.eq("categoryId", cat._id))
+          .collect();
+        return styles
+          .filter((s) => s.isActive)
+          .map((s) => ({ ...s, categoryName: cat.name, brandName: brand.name }));
+      })
+    );
+    const flatStyles = allStyles.flat();
+
+    // Enrich each style
+    const enriched = await Promise.all(
+      flatStyles.map(async (style) => {
+        const images = await ctx.db
+          .query("productImages")
+          .withIndex("by_style", (q) => q.eq("styleId", style._id))
+          .collect();
+        const primary = images.find((img) => img.isPrimary);
+        const primaryImageUrl = primary
+          ? await ctx.storage.getUrl(primary.storageId)
+          : null;
+
+        const variants = await ctx.db
+          .query("variants")
+          .withIndex("by_style", (q) => q.eq("styleId", style._id))
+          .collect();
+        const activeVariants = variants.filter((vr) => vr.isActive);
+
+        const branchSet = new Set<string>();
+        const sizeSet = new Set<string>();
+        const colorSet = new Set<string>();
+        const genderSet = new Set<string>();
+        for (const vr of activeVariants) {
+          if (vr.size) sizeSet.add(vr.size);
+          if (vr.color) colorSet.add(vr.color);
+          if (vr.gender) genderSet.add(vr.gender);
+          const inv = await ctx.db
+            .query("inventory")
+            .withIndex("by_variant", (q) => q.eq("variantId", vr._id))
+            .collect();
+          for (const row of inv) {
+            if (row.quantity > 0 && !warehouseIds.has(row.branchId as string)) {
+              branchSet.add(row.branchId as string);
+            }
+          }
+        }
+
+        // Brand logo
+        const cat = await ctx.db.get(style.categoryId);
+        const brandDoc = cat ? brandMap.get(String(cat.brandId)) : null;
+        const brandLogoUrl = brandDoc?.storageId
+          ? await ctx.storage.getUrl(brandDoc.storageId)
+          : null;
+
+        return {
+          _id: style._id,
+          name: style.name,
+          categoryName: style.categoryName,
+          brandName: style.brandName,
+          basePriceCentavos: style.basePriceCentavos,
+          createdAt: style.createdAt,
+          primaryImageUrl,
+          brandLogoUrl,
+          variantCount: activeVariants.length,
+          branchCount: branchSet.size,
+          sizes: Array.from(sizeSet),
+          colors: Array.from(colorSet),
+          genders: Array.from(genderSet),
+        };
+      })
+    );
+
+    // Build available filter options
+    const categoryNames = [...new Set(tagCategories.map((c) => c.name))].sort();
+    const allColors = [...new Set(enriched.flatMap((s) => s.colors))].sort();
+    const allSizes = [...new Set(enriched.flatMap((s) => s.sizes))];
+    const allGenders = [...new Set(enriched.flatMap((s) => s.genders))];
+    const brandNames = [...new Set(enriched.map((s) => s.brandName))].sort();
+
+    return {
+      tag: args.tag,
+      styles: enriched,
+      filters: {
+        categories: categoryNames,
+        brands: brandNames,
+        colors: allColors,
+        sizes: allSizes,
+        genders: allGenders,
+      },
+    };
+  },
+});
+
+export const getAllStylesForBrandPublic = query({
+  args: { brandId: v.id("brands") },
+  handler: async (ctx, args) => {
+    const brand = await ctx.db.get(args.brandId);
+    if (!brand || !brand.isActive) return null;
+
+    // Get all active categories for this brand
+    const categories = await ctx.db
+      .query("categories")
+      .withIndex("by_brand", (q) => q.eq("brandId", args.brandId))
+      .collect();
+    const activeCategories = categories.filter((c) => c.isActive);
+
+    // Brand logo
+    const brandLogoUrl = brand.storageId
+      ? await ctx.storage.getUrl(brand.storageId)
+      : null;
+    const bannerUrl = brand.bannerStorageId
+      ? await ctx.storage.getUrl(brand.bannerStorageId)
+      : null;
+
+    // Pre-fetch warehouse IDs once
+    const allBranches = await ctx.db.query("branches").collect();
+    const warehouseIds = new Set(
+      allBranches.filter((b) => b.type === "warehouse").map((b) => b._id as string)
+    );
+
+    // Gather all styles across all categories
+    const allStyles = await Promise.all(
+      activeCategories.map(async (cat) => {
+        const styles = await ctx.db
+          .query("styles")
+          .withIndex("by_category", (q) => q.eq("categoryId", cat._id))
+          .collect();
+        return styles.filter((s) => s.isActive).map((s) => ({ ...s, categoryName: cat.name }));
+      })
+    );
+    const flatStyles = allStyles.flat();
+
+    // Enrich each style
+    const enriched = await Promise.all(
+      flatStyles.map(async (style) => {
+        const images = await ctx.db
+          .query("productImages")
+          .withIndex("by_style", (q) => q.eq("styleId", style._id))
+          .collect();
+        const primary = images.find((img) => img.isPrimary);
+        const primaryImageUrl = primary
+          ? await ctx.storage.getUrl(primary.storageId)
+          : null;
+
+        const variants = await ctx.db
+          .query("variants")
+          .withIndex("by_style", (q) => q.eq("styleId", style._id))
+          .collect();
+        const activeVariants = variants.filter((vr) => vr.isActive);
+
+        const branchSet = new Set<string>();
+        const sizeSet = new Set<string>();
+        const colorSet = new Set<string>();
+        const genderSet = new Set<string>();
+        for (const vr of activeVariants) {
+          if (vr.size) sizeSet.add(vr.size);
+          if (vr.color) colorSet.add(vr.color);
+          if (vr.gender) genderSet.add(vr.gender);
+          const inv = await ctx.db
+            .query("inventory")
+            .withIndex("by_variant", (q) => q.eq("variantId", vr._id))
+            .collect();
+          for (const row of inv) {
+            if (row.quantity > 0 && !warehouseIds.has(row.branchId as string)) {
+              branchSet.add(row.branchId as string);
+            }
+          }
+        }
+
+        return {
+          _id: style._id,
+          name: style.name,
+          categoryName: style.categoryName,
+          basePriceCentavos: style.basePriceCentavos,
+          createdAt: style.createdAt,
+          primaryImageUrl,
+          variantCount: activeVariants.length,
+          branchCount: branchSet.size,
+          sizes: Array.from(sizeSet),
+          colors: Array.from(colorSet),
+          genders: Array.from(genderSet),
+        };
+      })
+    );
+
+    // Build available filter options
+    const allCategoryNames = [...new Set(activeCategories.map((c) => c.name))].sort();
+    const allColors = [...new Set(enriched.flatMap((s) => s.colors))].sort();
+    const allSizes = [...new Set(enriched.flatMap((s) => s.sizes))];
+    const allGenders = [...new Set(enriched.flatMap((s) => s.genders))];
+
+    return {
+      brand: {
+        _id: brand._id,
+        name: brand.name,
+        brandLogoUrl,
+        bannerUrl,
+      },
+      styles: enriched,
+      filters: {
+        categories: allCategoryNames,
+        colors: allColors,
+        sizes: allSizes,
+        genders: allGenders,
+      },
+    };
   },
 });
 
@@ -163,6 +416,10 @@ export const getStyleDetailPublic = query({
       })
     );
 
+    const brandLogoUrl = brand?.storageId
+      ? await ctx.storage.getUrl(brand.storageId)
+      : null;
+
     return {
       _id: style._id,
       name: style.name,
@@ -171,6 +428,7 @@ export const getStyleDetailPublic = query({
       brandName: brand?.name ?? "Unknown",
       categoryName: category?.name ?? "Unknown",
       images: imageUrls,
+      brandLogoUrl,
       variants: variantStock,
     };
   },
@@ -249,6 +507,104 @@ export const listActiveBranchesPublic = query({
         businessHours: b.configuration?.businessHours,
         timezone: b.configuration?.timezone,
       }));
+  },
+});
+
+export const searchStylesPublic = query({
+  args: { searchTerm: v.string() },
+  handler: async (ctx, args) => {
+    const term = args.searchTerm.toLowerCase().trim();
+    if (!term || term.length < 2) return [];
+
+    const styles = await ctx.db.query("styles").collect();
+    const activeStyles = styles.filter((s) => s.isActive);
+
+    // Search by style name, then enrich matching results
+    const matches = activeStyles.filter((s) =>
+      s.name.toLowerCase().includes(term)
+    );
+
+    // Also search by brand/category name
+    const categories = await ctx.db.query("categories").collect();
+    const brands = await ctx.db.query("brands").collect();
+    const brandMap = new Map(brands.map((b) => [String(b._id), b]));
+    const catMap = new Map(categories.map((c) => [String(c._id), c]));
+
+    const catMatches = categories.filter(
+      (c) => c.isActive && c.name.toLowerCase().includes(term)
+    );
+    const brandMatches = brands.filter(
+      (b) => b.isActive && b.name.toLowerCase().includes(term)
+    );
+
+    const matchedIds = new Set(matches.map((s) => String(s._id)));
+
+    // Add styles from matching categories
+    for (const cat of catMatches) {
+      for (const s of activeStyles) {
+        if (s.categoryId === cat._id && !matchedIds.has(String(s._id))) {
+          matches.push(s);
+          matchedIds.add(String(s._id));
+        }
+      }
+    }
+
+    // Add styles from matching brands
+    for (const brand of brandMatches) {
+      const brandCats = categories.filter((c) => c.brandId === brand._id);
+      for (const cat of brandCats) {
+        for (const s of activeStyles) {
+          if (s.categoryId === cat._id && !matchedIds.has(String(s._id))) {
+            matches.push(s);
+            matchedIds.add(String(s._id));
+          }
+        }
+      }
+    }
+
+    // Limit to 50 results and enrich
+    const limited = matches.slice(0, 50);
+
+    const enriched = await Promise.all(
+      limited.map(async (style) => {
+        const category = catMap.get(String(style.categoryId));
+        const brand = category ? brandMap.get(String(category.brandId)) : null;
+
+        const images = await ctx.db
+          .query("productImages")
+          .withIndex("by_style", (q) => q.eq("styleId", style._id))
+          .collect();
+        const primary = images.find((img) => img.isPrimary);
+        const primaryImageUrl = primary
+          ? await ctx.storage.getUrl(primary.storageId)
+          : null;
+
+        const variants = await ctx.db
+          .query("variants")
+          .withIndex("by_style", (q) => q.eq("styleId", style._id))
+          .collect();
+        const activeVariants = variants.filter((vr) => vr.isActive);
+
+        const brandLogoUrl = brand?.storageId
+          ? await ctx.storage.getUrl(brand.storageId)
+          : null;
+
+        return {
+          _id: style._id,
+          name: style.name,
+          basePriceCentavos: style.basePriceCentavos,
+          brandName: brand?.name ?? "",
+          categoryName: category?.name ?? "",
+          primaryImageUrl,
+          brandLogoUrl,
+          variantCount: activeVariants.length,
+          branchCount: 0, // skip heavy stock calc for search results
+          sizes: Array.from(new Set(activeVariants.map((v) => v.size))),
+        };
+      })
+    );
+
+    return enriched;
   },
 });
 

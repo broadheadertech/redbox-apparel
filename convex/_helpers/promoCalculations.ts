@@ -75,7 +75,13 @@ export function filterEligibleItems(
 
   // Extended filters (AND)
   if (promo.genders && promo.genders.length > 0) {
-    filtered = filtered.filter((item) => item.gender && promo.genders!.includes(item.gender));
+    filtered = filtered.filter((item) => {
+      if (!item.gender) return false;
+      if (promo.genders!.includes(item.gender)) return true;
+      // "kids" scope also matches "boys" and "girls"
+      if (promo.genders!.includes("kids") && (item.gender === "boys" || item.gender === "girls")) return true;
+      return false;
+    });
   }
   if (promo.colors && promo.colors.length > 0) {
     filtered = filtered.filter((item) => item.color && promo.colors!.includes(item.color));

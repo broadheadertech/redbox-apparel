@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -10,6 +10,7 @@ import { getErrorMessage } from "@/lib/utils";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { toast } from "sonner";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Table,
   TableBody,
@@ -46,7 +47,25 @@ import {
   XCircle,
   ArrowLeft,
   ChevronRight,
+  ImageIcon,
+  Trash2,
+  Upload,
 } from "lucide-react";
+
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
+const CATEGORY_TAGS = ["Clothing", "Shoes", "Bags", "Accessories", "Underwear"];
+
+function CategoryImageCell({ storageId }: { storageId: Id<"_storage"> }) {
+  const imageUrl = useQuery(api.catalog.publicBrowse.getImageUrl, { storageId });
+  if (!imageUrl) return <span className="text-sm text-muted-foreground">Loading...</span>;
+  return (
+    <div className="relative h-10 w-10 overflow-hidden rounded-md border">
+      <Image src={imageUrl} alt="Category" fill className="object-contain" sizes="40px" />
+    </div>
+  );
+}
 
 export default function BrandCategoriesPage() {
   const params = useParams();
@@ -64,20 +83,31 @@ export default function BrandCategoriesPage() {
   const reactivateCategory = useMutation(
     api.catalog.categories.reactivateCategory
   );
+  const generateUploadUrl = useMutation(api.catalog.images.generateUploadUrl);
+  const saveCategoryImage = useMutation(api.catalog.categories.saveCategoryImage);
+  const deleteCategoryImage = useMutation(api.catalog.categories.deleteCategoryImage);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Create dialog state
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "" });
+  const [createForm, setCreateForm] = useState({ name: "", tag: "" });
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
 
   // Edit dialog state
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
-  const [editForm, setEditForm] = useState({ name: "" });
+  const [editForm, setEditForm] = useState({ name: "", tag: "" });
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const editFileRef = useRef<HTMLInputElement>(null);
+
+  // Category image URL resolver
+  const categoryImageUrl = useQuery(
+    api.catalog.publicBrowse.getImageUrl,
+    editingCategory?.storageId ? { storageId: editingCategory.storageId } : "skip"
+  );
 
   // Filter categories
   const filteredCategories = categories?.filter((category) => {
@@ -94,7 +124,7 @@ export default function BrandCategoriesPage() {
   const pagination = usePagination(filteredCategories);
 
   const resetCreateForm = () => {
-    setCreateForm({ name: "" });
+    setCreateForm({ name: "", tag: "" });
     setCreateErrors({});
   };
 
@@ -113,6 +143,7 @@ export default function BrandCategoriesPage() {
       await createCategory({
         brandId,
         name: createForm.name.trim(),
+        tag: createForm.tag || undefined,
       });
       toast.success("Category created successfully");
       setShowCreateDialog(false);
@@ -126,7 +157,7 @@ export default function BrandCategoriesPage() {
 
   const openEditDialog = (category: Category) => {
     setEditingCategory(category);
-    setEditForm({ name: category.name });
+    setEditForm({ name: category.name, tag: category.tag ?? "" });
     setEditErrors({});
   };
 
@@ -145,6 +176,7 @@ export default function BrandCategoriesPage() {
       await updateCategory({
         categoryId: editingCategory._id,
         name: editForm.name.trim(),
+        tag: editForm.tag || undefined,
       });
       toast.success("Category updated successfully");
       setEditingCategory(null);
@@ -175,6 +207,51 @@ export default function BrandCategoriesPage() {
       toast.success(`"${category.name}" reactivated`);
     } catch (error) {
       toast.error(`Failed to reactivate: ${getErrorMessage(error)}`);
+    }
+  };
+
+  const handleCategoryImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingCategory) return;
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      toast.error("Invalid file type. Please upload JPEG, PNG, or WebP.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error("File too large. Maximum size is 5MB.");
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const uploadUrl = await generateUploadUrl();
+      const result = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      const { storageId } = await result.json();
+      await saveCategoryImage({ categoryId: editingCategory._id, storageId });
+      toast.success("Category image updated");
+    } catch (error) {
+      toast.error(`Failed to upload image: ${getErrorMessage(error)}`);
+    } finally {
+      setIsUploadingImage(false);
+      if (editFileRef.current) editFileRef.current.value = "";
+    }
+  };
+
+  const handleCategoryImageDelete = async () => {
+    if (!editingCategory) return;
+
+    setIsUploadingImage(true);
+    try {
+      await deleteCategoryImage({ categoryId: editingCategory._id });
+      toast.success("Category image removed");
+    } catch (error) {
+      toast.error(`Failed to remove image: ${getErrorMessage(error)}`);
+    } finally {
+      setIsUploadingImage(false);
     }
   };
 
@@ -276,6 +353,8 @@ export default function BrandCategoriesPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Category</TableHead>
+              <TableHead>Tag</TableHead>
+              <TableHead>Image</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -293,6 +372,20 @@ export default function BrandCategoriesPage() {
                       {category.name}
                       <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    {category.tag ? (
+                      <Badge variant="outline">{category.tag}</Badge>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {category.storageId ? (
+                      <CategoryImageCell storageId={category.storageId} />
+                    ) : (
+                      <span className="text-sm text-muted-foreground">None</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge
@@ -337,7 +430,7 @@ export default function BrandCategoriesPage() {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={3}
+                  colSpan={5}
                   className="text-center text-muted-foreground py-8"
                 >
                   {searchQuery || statusFilter !== "all"
@@ -384,7 +477,7 @@ export default function BrandCategoriesPage() {
                 placeholder="e.g. Shoes, Apparel, Accessories"
                 value={createForm.name}
                 onChange={(e) => {
-                  setCreateForm({ name: e.target.value });
+                  setCreateForm({ ...createForm, name: e.target.value });
                   if (createErrors.name) {
                     setCreateErrors({});
                   }
@@ -394,6 +487,27 @@ export default function BrandCategoriesPage() {
               {createErrors.name && (
                 <p className="text-sm text-destructive">{createErrors.name}</p>
               )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-cat-tag">Tag</Label>
+              <Select
+                value={createForm.tag || "_none"}
+                onValueChange={(val) =>
+                  setCreateForm({ ...createForm, tag: val === "_none" ? "" : val })
+                }
+              >
+                <SelectTrigger id="create-cat-tag">
+                  <SelectValue placeholder="Select a tag" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">None</SelectItem>
+                  {CATEGORY_TAGS.map((tag) => (
+                    <SelectItem key={tag} value={tag}>
+                      {tag}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>
@@ -432,7 +546,7 @@ export default function BrandCategoriesPage() {
                 id="edit-cat-name"
                 value={editForm.name}
                 onChange={(e) => {
-                  setEditForm({ name: e.target.value });
+                  setEditForm({ ...editForm, name: e.target.value });
                   if (editErrors.name) {
                     setEditErrors({});
                   }
@@ -442,6 +556,84 @@ export default function BrandCategoriesPage() {
               {editErrors.name && (
                 <p className="text-sm text-destructive">{editErrors.name}</p>
               )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-cat-tag">Tag</Label>
+              <Select
+                value={editForm.tag || "_none"}
+                onValueChange={(val) =>
+                  setEditForm({ ...editForm, tag: val === "_none" ? "" : val })
+                }
+              >
+                <SelectTrigger id="edit-cat-tag">
+                  <SelectValue placeholder="Select a tag" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">None</SelectItem>
+                  {CATEGORY_TAGS.map((tag) => (
+                    <SelectItem key={tag} value={tag}>
+                      {tag}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Category Image */}
+            <div className="space-y-2">
+              <Label>Image</Label>
+              {editingCategory?.storageId && categoryImageUrl ? (
+                <div className="flex items-center gap-3">
+                  <div className="relative h-16 w-16 overflow-hidden rounded-md border">
+                    <Image
+                      src={categoryImageUrl}
+                      alt="Category"
+                      fill
+                      className="object-contain"
+                      sizes="64px"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => editFileRef.current?.click()}
+                      disabled={isUploadingImage}
+                    >
+                      <Upload className="mr-1 h-3 w-3" />
+                      Replace
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCategoryImageDelete}
+                      disabled={isUploadingImage}
+                    >
+                      <Trash2 className="mr-1 h-3 w-3 text-destructive" />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => editFileRef.current?.click()}
+                  disabled={isUploadingImage}
+                >
+                  <Upload className="mr-1 h-3 w-3" />
+                  {isUploadingImage ? "Uploading..." : "Upload Image"}
+                </Button>
+              )}
+              <input
+                ref={editFileRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleCategoryImageUpload}
+              />
             </div>
           </div>
           <DialogFooter>

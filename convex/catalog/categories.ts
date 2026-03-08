@@ -37,6 +37,7 @@ export const createCategory = mutation({
   args: {
     brandId: v.id("brands"),
     name: v.string(),
+    tag: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, HQ_ROLES);
@@ -70,6 +71,7 @@ export const createCategory = mutation({
     const categoryId = await ctx.db.insert("categories", {
       brandId: args.brandId,
       name: args.name,
+      tag: args.tag,
       isActive: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -80,7 +82,7 @@ export const createCategory = mutation({
       userId: user._id,
       entityType: "categories",
       entityId: categoryId,
-      after: { brandId: args.brandId, name: args.name, isActive: true },
+      after: { brandId: args.brandId, name: args.name, tag: args.tag, isActive: true },
     });
 
     return categoryId;
@@ -91,6 +93,7 @@ export const updateCategory = mutation({
   args: {
     categoryId: v.id("categories"),
     name: v.optional(v.string()),
+    tag: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, HQ_ROLES);
@@ -128,6 +131,12 @@ export const updateCategory = mutation({
       before.name = existing.name;
       after.name = args.name;
       patch.name = args.name;
+    }
+
+    if (args.tag !== undefined && args.tag !== existing.tag) {
+      before.tag = existing.tag;
+      after.tag = args.tag;
+      patch.tag = args.tag || undefined;
     }
 
     if (Object.keys(patch).length === 0) {
@@ -210,6 +219,78 @@ export const reactivateCategory = mutation({
       entityId: args.categoryId,
       before: { isActive: false },
       after: { isActive: true },
+    });
+  },
+});
+
+// ─── Category Image ──────────────────────────────────────────────────────────
+
+export const saveCategoryImage = mutation({
+  args: {
+    categoryId: v.id("categories"),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, HQ_ROLES);
+
+    const category = await ctx.db.get(args.categoryId);
+    if (!category) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Category not found" });
+    }
+
+    if (category.storageId) {
+      await ctx.storage.delete(category.storageId);
+    }
+
+    await ctx.db.patch(args.categoryId, {
+      storageId: args.storageId,
+      updatedAt: Date.now(),
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "category.imageUpdate",
+      userId: user._id,
+      entityType: "categories",
+      entityId: args.categoryId,
+      before: { storageId: category.storageId },
+      after: { storageId: args.storageId },
+    });
+  },
+});
+
+export const deleteCategoryImage = mutation({
+  args: {
+    categoryId: v.id("categories"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, HQ_ROLES);
+
+    const category = await ctx.db.get(args.categoryId);
+    if (!category) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Category not found" });
+    }
+
+    if (!category.storageId) {
+      throw new ConvexError({
+        code: "NO_IMAGE",
+        message: "Category has no image to delete",
+      });
+    }
+
+    await ctx.storage.delete(category.storageId);
+
+    await ctx.db.patch(args.categoryId, {
+      storageId: undefined,
+      updatedAt: Date.now(),
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "category.imageDelete",
+      userId: user._id,
+      entityType: "categories",
+      entityId: args.categoryId,
+      before: { storageId: category.storageId },
+      after: { storageId: undefined },
     });
   },
 });

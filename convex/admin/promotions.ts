@@ -50,7 +50,7 @@ const commonArgs = {
   variantIds: v.array(v.id("variants")),
   styleIds: v.optional(v.array(v.id("styles"))),
   genders: v.optional(
-    v.array(v.union(v.literal("mens"), v.literal("womens"), v.literal("unisex"), v.literal("kids")))
+    v.array(v.union(v.literal("mens"), v.literal("womens"), v.literal("unisex"), v.literal("kids"), v.literal("boys"), v.literal("girls")))
   ),
   colors: v.optional(v.array(v.string())),
   sizes: v.optional(v.array(v.string())),

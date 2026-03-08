@@ -769,10 +769,12 @@ export default function VariantsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Not specified</SelectItem>
-                    <SelectItem value="mens">Men&apos;s</SelectItem>
-                    <SelectItem value="womens">Women&apos;s</SelectItem>
+                    <SelectItem value="mens">Men</SelectItem>
+                    <SelectItem value="womens">Women</SelectItem>
                     <SelectItem value="unisex">Unisex</SelectItem>
                     <SelectItem value="kids">Kids</SelectItem>
+                    <SelectItem value="boys">Boys</SelectItem>
+                    <SelectItem value="girls">Girls</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -935,10 +937,12 @@ export default function VariantsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Not specified</SelectItem>
-                    <SelectItem value="mens">Men&apos;s</SelectItem>
-                    <SelectItem value="womens">Women&apos;s</SelectItem>
+                    <SelectItem value="mens">Men</SelectItem>
+                    <SelectItem value="womens">Women</SelectItem>
                     <SelectItem value="unisex">Unisex</SelectItem>
                     <SelectItem value="kids">Kids</SelectItem>
+                    <SelectItem value="boys">Boys</SelectItem>
+                    <SelectItem value="girls">Girls</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
