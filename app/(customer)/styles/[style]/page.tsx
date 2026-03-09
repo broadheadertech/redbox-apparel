@@ -19,7 +19,7 @@ import { CustomerProductCard } from "@/components/customer/CustomerProductCard";
 import { QuickViewSheet } from "@/components/customer/QuickViewSheet";
 import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import { cn } from "@/lib/utils";
-import { STYLE_COLLECTIONS } from "../page";
+import { STYLE_COLLECTIONS } from "@/lib/styleCollections";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

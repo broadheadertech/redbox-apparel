@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { useState } from "react";
 import { ClipboardCheck, Loader2, AlertTriangle, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -53,7 +54,7 @@ export default function CycleCountPage() {
     try {
       await updateQty({
         cycleCountId: activeCount._id,
-        variantId: variantId as any,
+        variantId: variantId as Id<"variants">,
         countedQuantity: num,
       });
     } catch {

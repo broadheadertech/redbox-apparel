@@ -26,10 +26,11 @@ export function VoteButton({ styleId, className }: VoteButtonProps) {
     try {
       await voteForProduct({ styleId });
       toast.success("Vote recorded! Thanks for your input.");
-    } catch (err: any) {
-      if (err?.message?.includes("already voted")) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "";
+      if (message.includes("already voted")) {
         toast.info("You've already voted for this product.");
-      } else if (err?.message?.includes("logged in")) {
+      } else if (message.includes("logged in")) {
         toast.error("Please sign in to vote.");
       } else {
         toast.error("Could not submit vote. Try again.");

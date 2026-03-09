@@ -1448,7 +1448,7 @@ function RushModeCart({
           </div>
         ) : (
           <div className="space-y-2">
-            {items.map((item, i) => (
+            {items.map((item) => (
               <div
                 key={item.variantId as string}
                 className="flex items-center justify-between rounded-lg border p-3"
