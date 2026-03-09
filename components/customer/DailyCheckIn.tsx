@@ -26,7 +26,7 @@ export function DailyCheckIn() {
 
   // Hide the card once checked in
   if (hasCheckedIn) return null;
-  const currentStreak = justClaimed ? justClaimed.streakDay : status.currentStreak;
+  const currentStreak = status.currentStreak;
 
   async function handleCheckIn() {
     if (checking || hasCheckedIn) return;
@@ -66,26 +66,17 @@ export function DailyCheckIn() {
             </div>
           </div>
           <div className="flex-shrink-0">
-            {hasCheckedIn ? (
-              <div className="flex items-center gap-1.5 rounded-lg bg-green-500/10 px-3 py-1.5 text-xs font-semibold text-green-500">
-                <Check className="h-3.5 w-3.5" />
-                <span>
-                  +{justClaimed?.pointsAwarded ?? DAY_POINTS[Math.min(streakInCycle - 1, 6)]}pts
-                </span>
-              </div>
-            ) : (
-              <button
-                onClick={handleCheckIn}
-                disabled={checking}
-                className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground transition-all hover:bg-primary/90 active:scale-95 disabled:opacity-50"
-              >
-                {checking ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Check In"
-                )}
-              </button>
-            )}
+            <button
+              onClick={handleCheckIn}
+              disabled={checking}
+              className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground transition-all hover:bg-primary/90 active:scale-95 disabled:opacity-50"
+            >
+              {checking ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Check In"
+              )}
+            </button>
           </div>
         </div>
 
