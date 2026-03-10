@@ -902,6 +902,29 @@ export default defineSchema({
     .index("by_active", ["isActive"])
     .index("by_style", ["styleId"]),
 
+  // ─── Sell-Through Notes (Merchandising Verdicts) ───────────────────────────
+  sellThruNotes: defineTable({
+    styleId: v.id("styles"),
+    branchId: v.optional(v.id("branches")), // null = overall note
+    note: v.string(),
+    verdict: v.optional(
+      v.union(
+        v.literal("markdown"),
+        v.literal("transfer"),
+        v.literal("return_to_supplier"),
+        v.literal("bundle"),
+        v.literal("promote"),
+        v.literal("hold"),
+        v.literal("other")
+      )
+    ),
+    authorId: v.id("users"),
+    authorName: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_style", ["styleId"])
+    .index("by_style_branch", ["styleId", "branchId"]),
+
   // ─── Check-Ins (Daily Rewards) ──────────────────────────────────────────────
   checkIns: defineTable({
     customerId: v.id("customers"),

@@ -63,6 +63,7 @@ const managementNavItems: NavItem[] = [
   { href: "/admin/announcements", label: "Announcements", icon: Megaphone, roles: ["admin"] },
   { href: "/admin/hot-deals", label: "Hot Deals", icon: Flame, roles: ["admin"] },
   { href: "/admin/drops", label: "Exclusive Drops", icon: Sparkles, roles: ["admin"] },
+  { href: "/admin/sell-through", label: "Sell-Through", icon: BarChart3, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
   { href: "/admin/size-curves", label: "Size Curves", icon: Ruler, roles: ["admin"] },
   { href: "/admin/expansion", label: "Expansion Intel", icon: MapPin, roles: ["admin"] },

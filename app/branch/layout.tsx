@@ -38,6 +38,7 @@ const navItems = [
   { href: "/branch/demand", label: "Demand", icon: TrendingUp },
   { href: "/branch/alerts", label: "Alerts", icon: Bell },
   { href: "/branch/quarantine", label: "Quarantine", icon: ShieldAlert },
+  { href: "/branch/sell-through", label: "Sell-Through", icon: BarChart3 },
   { href: "/branch/champions", label: "Champions", icon: Trophy },
 ];
 

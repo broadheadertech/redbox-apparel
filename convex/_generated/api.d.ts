@@ -28,6 +28,7 @@ import type * as ai_restockSuggestions from "../ai/restockSuggestions.js";
 import type * as analytics_commandCenter from "../analytics/commandCenter.js";
 import type * as analytics_expansionIntel from "../analytics/expansionIntel.js";
 import type * as analytics_holidayForecast from "../analytics/holidayForecast.js";
+import type * as analytics_sellThrough from "../analytics/sellThrough.js";
 import type * as analytics_staffChampions from "../analytics/staffChampions.js";
 import type * as analytics_trendingByCity from "../analytics/trendingByCity.js";
 import type * as audit_logs from "../audit/logs.js";
@@ -146,6 +147,7 @@ declare const fullApi: ApiFromModules<{
   "analytics/commandCenter": typeof analytics_commandCenter;
   "analytics/expansionIntel": typeof analytics_expansionIntel;
   "analytics/holidayForecast": typeof analytics_holidayForecast;
+  "analytics/sellThrough": typeof analytics_sellThrough;
   "analytics/staffChampions": typeof analytics_staffChampions;
   "analytics/trendingByCity": typeof analytics_trendingByCity;
   "audit/logs": typeof audit_logs;
