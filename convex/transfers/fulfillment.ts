@@ -2,6 +2,7 @@ import { query, mutation } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
+import { withBranchScope } from "../_helpers/withBranchScope";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { clearReservedOnDelivery } from "../_helpers/transferStock";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
@@ -587,7 +588,6 @@ export const confirmTransferDelivery = mutation({
 export const listBranchInTransitTransfers = query({
   args: {},
   handler: async (ctx) => {
-    const { withBranchScope } = await import("../_helpers/withBranchScope");
     const scope = await withBranchScope(ctx);
     if (!scope.branchId) return [];
 
