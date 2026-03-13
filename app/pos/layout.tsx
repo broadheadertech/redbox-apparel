@@ -210,6 +210,16 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
               Returns
             </Link>
           )}
+          {/* Voids — manager/admin only */}
+          {(currentUser?.role === "admin" || currentUser?.role === "manager") &&
+            pathname !== "/pos/voids" && (
+              <Link
+                href="/pos/voids"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Voids
+              </Link>
+            )}
           {/* Task 5.5: Override status to "syncing" during offline queue replay */}
           <ConnectionIndicator
             status={syncStatus === "syncing" ? "syncing" : undefined}

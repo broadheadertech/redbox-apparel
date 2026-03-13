@@ -39,13 +39,15 @@ import { Pencil, Plus, Search, ToggleLeft, ToggleRight } from "lucide-react";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-type PromoType = "percentage" | "fixedAmount" | "buyXGetY" | "tiered";
+type PromoType = "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
 
 const PROMO_TYPE_OPTIONS: { value: PromoType; label: string }[] = [
   { value: "percentage", label: "Percentage" },
   { value: "fixedAmount", label: "Fixed Amount" },
   { value: "buyXGetY", label: "Buy X Get Y" },
   { value: "tiered", label: "Tiered" },
+  { value: "crossSell", label: "Cross-Sell Bundle" },
+  { value: "pwp", label: "Purchase with Purchase" },
 ];
 
 const PROMO_TYPE_LABELS: Record<PromoType, string> = {
@@ -53,6 +55,8 @@ const PROMO_TYPE_LABELS: Record<PromoType, string> = {
   fixedAmount: "Fixed Amount",
   buyXGetY: "Buy X Get Y",
   tiered: "Tiered",
+  crossSell: "Cross-Sell",
+  pwp: "PWP",
 };
 
 const PROMO_TYPE_COLORS: Record<PromoType, string> = {
@@ -60,6 +64,8 @@ const PROMO_TYPE_COLORS: Record<PromoType, string> = {
   fixedAmount: "bg-purple-100 text-purple-800",
   buyXGetY: "bg-amber-100 text-amber-800",
   tiered: "bg-teal-100 text-teal-800",
+  crossSell: "bg-pink-100 text-pink-800",
+  pwp: "bg-orange-100 text-orange-800",
 };
 
 type StatusFilter = "all" | "active" | "inactive" | "expired" | "upcoming";
@@ -164,6 +170,17 @@ interface PromoForm {
   selectedSizes: string[];
   allStock: boolean;
   agingTiers: ("green" | "yellow" | "red")[];
+  // crossSell
+  crossSellRewardType: "percentage" | "fixedAmount";
+  rewardBrandIds: Id<"brands">[];
+  rewardCategoryIds: Id<"categories">[];
+  rewardStyleIds: Id<"styles">[];
+  rewardVariantIds: Id<"variants">[];
+  // pwp
+  pwpTriggerMinQuantity: string;
+  pwpRewardStyleIds: Id<"styles">[];  // local picker state (not stored)
+  pwpRewardVariantIds: Id<"variants">[];
+  pwpRewardPriceCentavos: string;
 }
 
 function emptyForm(): PromoForm {
@@ -195,6 +212,15 @@ function emptyForm(): PromoForm {
     selectedSizes: [],
     allStock: true,
     agingTiers: [],
+    crossSellRewardType: "percentage",
+    rewardBrandIds: [],
+    rewardCategoryIds: [],
+    rewardStyleIds: [],
+    rewardVariantIds: [],
+    pwpTriggerMinQuantity: "1",
+    pwpRewardStyleIds: [],
+    pwpRewardVariantIds: [],
+    pwpRewardPriceCentavos: "",
   };
 }
 
@@ -229,6 +255,18 @@ export default function PromotionsPage() {
   );
   const [form, setForm] = useState<PromoForm>(emptyForm());
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reward variants — depends on form.rewardStyleIds so must come after form state
+  const rewardVariants = useQuery(
+    api.admin.promotions.listVariantsForStyles,
+    form.rewardStyleIds.length > 0 ? { styleIds: form.rewardStyleIds } : "skip"
+  );
+
+  // PWP reward variants
+  const pwpRewardVariants = useQuery(
+    api.admin.promotions.listVariantsForStyles,
+    form.pwpRewardStyleIds.length > 0 ? { styleIds: form.pwpRewardStyleIds } : "skip"
+  );
 
   // ── Client-side filtering ───────────────────────────────────────────────
 
@@ -356,6 +394,15 @@ export default function PromotionsPage() {
       selectedSizes: promo.sizes ?? [],
       allStock: !promo.agingTiers || promo.agingTiers.length === 0,
       agingTiers: (promo.agingTiers ?? []) as ("green" | "yellow" | "red")[],
+      crossSellRewardType: (promo.crossSellRewardType ?? "percentage") as "percentage" | "fixedAmount",
+      rewardBrandIds: (promo.rewardBrandIds ?? []) as Id<"brands">[],
+      rewardCategoryIds: (promo.rewardCategoryIds ?? []) as Id<"categories">[],
+      rewardStyleIds: (promo.rewardStyleIds ?? []) as Id<"styles">[],
+      rewardVariantIds: (promo.rewardVariantIds ?? []) as Id<"variants">[],
+      pwpTriggerMinQuantity: promo.pwpTriggerMinQuantity?.toString() ?? "1",
+      pwpRewardStyleIds: [],  // local only — reset on edit; user re-selects to see variants
+      pwpRewardVariantIds: (promo.pwpRewardVariantIds ?? []) as Id<"variants">[],
+      pwpRewardPriceCentavos: promo.pwpRewardPriceCentavos?.toString() ?? "",
     });
     setShowCreateDialog(true);
   }
@@ -415,6 +462,14 @@ export default function PromotionsPage() {
       isActive: form.isActive,
       priority: parseInt(form.priority, 10) || 0,
       agingTiers: form.allStock ? undefined : form.agingTiers,
+      crossSellRewardType: form.promoType === "crossSell" ? form.crossSellRewardType : undefined,
+      rewardBrandIds: form.promoType === "crossSell" ? form.rewardBrandIds : undefined,
+      rewardCategoryIds: form.promoType === "crossSell" ? form.rewardCategoryIds : undefined,
+      rewardStyleIds: form.promoType === "crossSell" && form.rewardStyleIds.length > 0 ? form.rewardStyleIds : undefined,
+      rewardVariantIds: form.promoType === "crossSell" && form.rewardVariantIds.length > 0 ? form.rewardVariantIds : ([] as Id<"variants">[]),
+      pwpTriggerMinQuantity: form.promoType === "pwp" && form.pwpTriggerMinQuantity ? parseInt(form.pwpTriggerMinQuantity, 10) : undefined,
+      pwpRewardVariantIds: form.promoType === "pwp" && form.pwpRewardVariantIds.length > 0 ? form.pwpRewardVariantIds : undefined,
+      pwpRewardPriceCentavos: form.promoType === "pwp" && form.pwpRewardPriceCentavos !== "" ? parseInt(form.pwpRewardPriceCentavos, 10) : undefined,
     };
   }
 
@@ -832,6 +887,334 @@ export default function PromotionsPage() {
               </div>
             )}
 
+            {form.promoType === "crossSell" && (
+              <div className="space-y-3 rounded-md border border-pink-200 bg-pink-50/40 p-3">
+                <p className="text-xs font-semibold text-pink-700">
+                  Cross-Sell: Reward Discount
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  When trigger products (defined in Product Scope below) are in the cart,
+                  this discount applies to the reward products selected here.
+                </p>
+
+                {/* Reward discount type */}
+                <div className="space-y-2">
+                  <Label>Reward Discount Type</Label>
+                  <Select
+                    value={form.crossSellRewardType}
+                    onValueChange={(v) => updateField("crossSellRewardType", v as "percentage" | "fixedAmount")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="percentage">Percentage Off</SelectItem>
+                      <SelectItem value="fixedAmount">Fixed Amount Off</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {form.crossSellRewardType === "percentage" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Reward % Off <span className="text-destructive">*</span></Label>
+                      <Input
+                        type="number" min="1" max="100" placeholder="e.g. 20"
+                        value={form.percentageValue}
+                        onChange={(e) => updateField("percentageValue", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Max Discount Cap (centavos)</Label>
+                      <Input
+                        type="number" min="0" placeholder="e.g. 50000"
+                        value={form.maxDiscountCentavos}
+                        onChange={(e) => updateField("maxDiscountCentavos", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {form.crossSellRewardType === "fixedAmount" && (
+                  <div className="space-y-2">
+                    <Label>Reward Fixed Amount (centavos) <span className="text-destructive">*</span></Label>
+                    <Input
+                      type="number" min="1" placeholder="e.g. 10000"
+                      value={form.fixedAmountCentavos}
+                      onChange={(e) => updateField("fixedAmountCentavos", e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {/* Reward product scope */}
+                <div className="space-y-2">
+                  <Label>Reward Products — Brands</Label>
+                  <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1 bg-background">
+                    {!brands || brands.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No brands</p>
+                    ) : (
+                      brands.map((brand) => (
+                        <label key={brand._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={form.rewardBrandIds.includes(brand._id as Id<"brands">)}
+                            onChange={(e) => {
+                              const bid = brand._id as Id<"brands">;
+                              if (e.target.checked) {
+                                updateField("rewardBrandIds", [...form.rewardBrandIds, bid]);
+                              } else {
+                                updateField("rewardBrandIds", form.rewardBrandIds.filter((id) => id !== bid));
+                              }
+                            }}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          {brand.name}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Reward Products — Categories</Label>
+                  <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1 bg-background">
+                    {!categories || categories.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No categories</p>
+                    ) : (
+                      categories
+                        .filter((cat) => form.rewardBrandIds.length === 0 || form.rewardBrandIds.includes(cat.brandId))
+                        .map((cat) => (
+                          <label key={cat._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={form.rewardCategoryIds.includes(cat._id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  updateField("rewardCategoryIds", [...form.rewardCategoryIds, cat._id]);
+                                } else {
+                                  updateField("rewardCategoryIds", form.rewardCategoryIds.filter((id) => id !== cat._id));
+                                }
+                              }}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                            {cat.name}
+                          </label>
+                        ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Reward Products — Styles <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                  <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1 bg-background">
+                    {!styles || styles.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No styles</p>
+                    ) : (
+                      styles
+                        .filter((s) => form.rewardCategoryIds.length === 0 || form.rewardCategoryIds.includes(s.categoryId))
+                        .map((style) => (
+                          <label key={style._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={form.rewardStyleIds.includes(style._id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  updateField("rewardStyleIds", [...form.rewardStyleIds, style._id]);
+                                } else {
+                                  // Clear variant selections belonging to this style when style is deselected
+                                  const removedStyleId = style._id;
+                                  const variantsOfStyle = rewardVariants?.filter((v) => v.styleId === removedStyleId).map((v) => v._id as Id<"variants">) ?? [];
+                                  updateField("rewardStyleIds", form.rewardStyleIds.filter((id) => id !== removedStyleId));
+                                  if (variantsOfStyle.length > 0) {
+                                    updateField("rewardVariantIds", form.rewardVariantIds.filter((vid) => !variantsOfStyle.includes(vid)));
+                                  }
+                                }
+                              }}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                            {style.name}
+                          </label>
+                        ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Specific reward variants — only shown when styles are selected */}
+                {form.rewardStyleIds.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>
+                      Reward Products — Specific Variants{" "}
+                      <span className="text-xs text-muted-foreground">(optional — leave empty to include all variants of selected styles)</span>
+                    </Label>
+                    <div className="border rounded-md p-3 max-h-48 overflow-y-auto space-y-1 bg-background">
+                      {rewardVariants === undefined ? (
+                        <p className="text-xs text-muted-foreground">Loading...</p>
+                      ) : rewardVariants.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No active variants for selected styles.</p>
+                      ) : (
+                        rewardVariants.map((variant) => {
+                          const styleName = styles?.find((s) => s._id === variant.styleId)?.name ?? "";
+                          return (
+                            <label key={variant._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                              <input
+                                type="checkbox"
+                                checked={form.rewardVariantIds.includes(variant._id as Id<"variants">)}
+                                onChange={(e) => {
+                                  const vid = variant._id as Id<"variants">;
+                                  if (e.target.checked) {
+                                    updateField("rewardVariantIds", [...form.rewardVariantIds, vid]);
+                                  } else {
+                                    updateField("rewardVariantIds", form.rewardVariantIds.filter((id) => id !== vid));
+                                  }
+                                }}
+                                className="h-4 w-4 rounded border-gray-300"
+                              />
+                              <span className="flex-1 min-w-0">
+                                <span className="font-medium">{styleName}</span>
+                                <span className="text-muted-foreground"> · {variant.size} · {variant.color}</span>
+                              </span>
+                              {variant.sku && (
+                                <span className="text-xs text-muted-foreground shrink-0">{variant.sku}</span>
+                              )}
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                    {form.rewardVariantIds.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {form.rewardVariantIds.length} variant{form.rewardVariantIds.length !== 1 ? "s" : ""} selected
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  Leave reward products empty = discount applies to ALL products not in the trigger scope.
+                </p>
+              </div>
+            )}
+
+            {form.promoType === "pwp" && (
+              <div className="space-y-3 rounded-md border border-orange-200 bg-orange-50/40 p-3">
+                <p className="text-xs font-semibold text-orange-700">
+                  Purchase with Purchase (PWP)
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  When the customer buys the minimum quantity of trigger products (defined in Product Scope below),
+                  they can purchase the reward product(s) at a special price.
+                </p>
+
+                {/* Trigger min quantity */}
+                <div className="space-y-2">
+                  <Label>Minimum Trigger Quantity <span className="text-destructive">*</span></Label>
+                  <Input
+                    type="number" min="1" placeholder="e.g. 3"
+                    value={form.pwpTriggerMinQuantity}
+                    onChange={(e) => updateField("pwpTriggerMinQuantity", e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Customer must add at least this many trigger items to qualify.
+                  </p>
+                </div>
+
+                {/* Reward special price */}
+                <div className="space-y-2">
+                  <Label>Reward Special Price (centavos) <span className="text-destructive">*</span></Label>
+                  <Input
+                    type="number" min="0" placeholder="e.g. 19900 = ₱199"
+                    value={form.pwpRewardPriceCentavos}
+                    onChange={(e) => updateField("pwpRewardPriceCentavos", e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    The special price the reward item sells for. Discount = original price − this price.
+                  </p>
+                </div>
+
+                {/* Reward product picker: pick styles → then variants */}
+                <div className="space-y-2">
+                  <Label>Reward Products — Pick by Style <span className="text-xs text-muted-foreground">(select to reveal variants)</span></Label>
+                  <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1 bg-background">
+                    {!styles || styles.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No styles</p>
+                    ) : (
+                      styles.map((style) => (
+                        <label key={style._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={form.pwpRewardStyleIds.includes(style._id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                updateField("pwpRewardStyleIds", [...form.pwpRewardStyleIds, style._id]);
+                              } else {
+                                const removedStyleId = style._id;
+                                const variantsOfStyle = pwpRewardVariants?.filter((v) => v.styleId === removedStyleId).map((v) => v._id as Id<"variants">) ?? [];
+                                updateField("pwpRewardStyleIds", form.pwpRewardStyleIds.filter((id) => id !== removedStyleId));
+                                if (variantsOfStyle.length > 0) {
+                                  updateField("pwpRewardVariantIds", form.pwpRewardVariantIds.filter((vid) => !variantsOfStyle.includes(vid)));
+                                }
+                              }
+                            }}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          {style.name}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {form.pwpRewardStyleIds.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>
+                      Reward Products — Specific Variants <span className="text-destructive">*</span>
+                      {" "}<span className="text-xs text-muted-foreground">(select exact items customer gets at special price)</span>
+                    </Label>
+                    <div className="border rounded-md p-3 max-h-48 overflow-y-auto space-y-1 bg-background">
+                      {pwpRewardVariants === undefined ? (
+                        <p className="text-xs text-muted-foreground">Loading...</p>
+                      ) : pwpRewardVariants.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No active variants for selected styles.</p>
+                      ) : (
+                        pwpRewardVariants.map((variant) => {
+                          const styleName = styles?.find((s) => s._id === variant.styleId)?.name ?? "";
+                          return (
+                            <label key={variant._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                              <input
+                                type="checkbox"
+                                checked={form.pwpRewardVariantIds.includes(variant._id as Id<"variants">)}
+                                onChange={(e) => {
+                                  const vid = variant._id as Id<"variants">;
+                                  if (e.target.checked) {
+                                    updateField("pwpRewardVariantIds", [...form.pwpRewardVariantIds, vid]);
+                                  } else {
+                                    updateField("pwpRewardVariantIds", form.pwpRewardVariantIds.filter((id) => id !== vid));
+                                  }
+                                }}
+                                className="h-4 w-4 rounded border-gray-300"
+                              />
+                              <span className="flex-1 min-w-0">
+                                <span className="font-medium">{styleName}</span>
+                                <span className="text-muted-foreground"> · {variant.size} · {variant.color}</span>
+                              </span>
+                              {variant.sku && (
+                                <span className="text-xs text-muted-foreground shrink-0">{variant.sku}</span>
+                              )}
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                    {form.pwpRewardVariantIds.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {form.pwpRewardVariantIds.length} reward variant{form.pwpRewardVariantIds.length !== 1 ? "s" : ""} selected
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Date range */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -1022,7 +1405,21 @@ export default function PromotionsPage() {
 
             {/* Scope: Product Filters */}
             <div className="space-y-3">
-              <Label>Product Scope</Label>
+              <Label>
+                {form.promoType === "crossSell" || form.promoType === "pwp"
+                  ? "Trigger Products (must be in cart)"
+                  : "Product Scope"}
+              </Label>
+              {form.promoType === "crossSell" && (
+                <p className="text-xs text-muted-foreground">
+                  The discount fires when at least one of these products is in the cart.
+                </p>
+              )}
+              {form.promoType === "pwp" && (
+                <p className="text-xs text-muted-foreground">
+                  Customer must have at least {form.pwpTriggerMinQuantity || "N"} of these products in their cart.
+                </p>
+              )}
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"

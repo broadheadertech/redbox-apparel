@@ -19,11 +19,16 @@ import {
   ShieldAlert,
   Trophy,
   Sunrise,
+  QrCode,
+  Clock,
+  UserCheck,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
 
 const ALLOWED_ROLES = ["admin", "manager", "viewer"];
 
@@ -31,15 +36,20 @@ const navItems = [
   { href: "/branch/command-center", label: "Command Center", icon: Sunrise },
   { href: "/branch/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/branch/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/branch/reports", label: "Reports", icon: FileText },
   { href: "/branch/stock", label: "Stock", icon: Package },
   { href: "/branch/transfers", label: "Transfers", icon: ArrowRightLeft },
+  { href: "/branch/box-receiving", label: "Receiving", icon: QrCode },
   { href: "/branch/invoices", label: "Invoices", icon: FileText },
   { href: "/branch/reservations", label: "Reservations", icon: CalendarCheck },
   { href: "/branch/demand", label: "Demand", icon: TrendingUp },
   { href: "/branch/alerts", label: "Alerts", icon: Bell },
   { href: "/branch/quarantine", label: "Quarantine", icon: ShieldAlert },
   { href: "/branch/sell-through", label: "Sell-Through", icon: BarChart3 },
+  { href: "/branch/inventory-aging", label: "Inventory Aging", icon: Clock },
   { href: "/branch/champions", label: "Champions", icon: Trophy },
+  { href: "/branch/fashion-assistants", label: "Fashion Assistants", icon: UserCheck },
+  { href: "/branch/cross-sell-analytics", label: "Cross-Sell", icon: Sparkles },
 ];
 
 export default function BranchLayout({
@@ -80,7 +90,7 @@ export default function BranchLayout({
   return (
     <ErrorBoundary>
       <div className="theme-dashboard flex min-h-screen">
-        <aside className="w-60 border-r bg-gray-50/50">
+        <aside className="w-60 border-r bg-gray-50/50 print:hidden">
           <div className="p-4">
             {siteAssets?.siteLogoUrl ? (
               <Image
@@ -93,9 +103,10 @@ export default function BranchLayout({
             ) : (
               <h2 className="text-lg font-semibold">Branch Manager</h2>
             )}
-            <p className="text-sm text-muted-foreground">
-              {currentUser.name}
-            </p>
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-sm text-muted-foreground">{currentUser.name}</p>
+              <StaffNotificationBell />
+            </div>
           </div>
           <Separator />
           <nav className="p-2">

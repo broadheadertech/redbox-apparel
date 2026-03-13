@@ -3,6 +3,7 @@ import { v, ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { internal } from "../_generated/api";
 
 // M2 fix: per-invocation branch name cache (same pattern as fulfillment.ts)
 function makeBranchNameResolver(
@@ -197,11 +198,18 @@ export const assignDriverToTransfer = mutation({
     }
 
     const now = Date.now();
+
+    // Compute expected delivery date from expectedDeliveryDays set during packing
+    const expectedDeliveryDate = transfer.expectedDeliveryDays
+      ? now + transfer.expectedDeliveryDays * 86_400_000
+      : undefined;
+
     await ctx.db.patch(args.transferId, {
       status: "inTransit",
       driverId: args.driverId,
       shippedAt: now,
       shippedById: user._id,
+      ...(expectedDeliveryDate ? { expectedDeliveryDate } : {}),
       updatedAt: now,
     });
 
@@ -215,7 +223,171 @@ export const assignDriverToTransfer = mutation({
         status: "inTransit",
         driverId: args.driverId,
         shippedById: user._id,
+        expectedDeliveryDate,
       },
     });
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "driver_assigned",
+      transferId: args.transferId,
+    });
+  },
+});
+
+// ─── Driver Analytics ───────────────────────────────────────────────────────
+
+export const getDriverAnalytics = query({
+  args: {
+    periodDays: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const periodMs = (args.periodDays ?? 90) * 86_400_000;
+    const cutoff = Date.now() - periodMs;
+
+    // Get all delivered transfers with drivers
+    const deliveredTransfers = await ctx.db
+      .query("transfers")
+      .withIndex("by_status", (q) => q.eq("status", "delivered"))
+      .collect();
+
+    const recentDriverDeliveries = deliveredTransfers.filter(
+      (t) => t.driverId && t.deliveredAt && (t.deliveredAt >= cutoff)
+    );
+
+    // Get all active drivers
+    const allDrivers = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "driver"))
+      .collect();
+
+    const driverMap = new Map(allDrivers.map((d) => [d._id as string, d]));
+    const getBranchName = makeBranchNameResolver((id) => ctx.db.get(id));
+
+    // Group by driver
+    const driverStats = new Map<string, {
+      driverId: string;
+      driverName: string;
+      totalDeliveries: number;
+      onTime: number;
+      late: number;
+      totalDeliveryTimeMs: number;
+      deliveries: {
+        transferId: string;
+        route: string;
+        shippedAt: number;
+        deliveredAt: number;
+        expectedDate: number | null;
+        deliveryTimeHours: number;
+        isOnTime: boolean;
+      }[];
+    }>();
+
+    for (const t of recentDriverDeliveries) {
+      const did = t.driverId as string;
+      if (!driverStats.has(did)) {
+        const driver = driverMap.get(did);
+        driverStats.set(did, {
+          driverId: did,
+          driverName: driver?.name ?? "Unknown",
+          totalDeliveries: 0,
+          onTime: 0,
+          late: 0,
+          totalDeliveryTimeMs: 0,
+          deliveries: [],
+        });
+      }
+
+      const stats = driverStats.get(did)!;
+      const deliveryTimeMs = (t.deliveredAt ?? 0) - (t.shippedAt ?? 0);
+      const deliveryTimeHours = Math.round(deliveryTimeMs / 3_600_000 * 10) / 10;
+      const isOnTime = t.expectedDeliveryDate
+        ? (t.deliveredAt ?? 0) <= t.expectedDeliveryDate
+        : true; // no ETA = assume on time
+
+      const fromName = await getBranchName(t.fromBranchId);
+      const toName = await getBranchName(t.toBranchId);
+
+      stats.totalDeliveries++;
+      if (isOnTime) stats.onTime++;
+      else stats.late++;
+      stats.totalDeliveryTimeMs += deliveryTimeMs;
+      stats.deliveries.push({
+        transferId: t._id as string,
+        route: `${fromName} → ${toName}`,
+        shippedAt: t.shippedAt ?? 0,
+        deliveredAt: t.deliveredAt ?? 0,
+        expectedDate: t.expectedDeliveryDate ?? null,
+        deliveryTimeHours,
+        isOnTime,
+      });
+    }
+
+    const rankings = [...driverStats.values()]
+      .map((s) => ({
+        driverId: s.driverId,
+        driverName: s.driverName,
+        totalDeliveries: s.totalDeliveries,
+        onTime: s.onTime,
+        late: s.late,
+        onTimeRate: s.totalDeliveries > 0
+          ? Math.round((s.onTime / s.totalDeliveries) * 100)
+          : 0,
+        avgDeliveryHours: s.totalDeliveries > 0
+          ? Math.round((s.totalDeliveryTimeMs / s.totalDeliveries / 3_600_000) * 10) / 10
+          : 0,
+        recentDeliveries: s.deliveries
+          .sort((a, b) => b.deliveredAt - a.deliveredAt)
+          .slice(0, 10),
+      }))
+      .sort((a, b) => b.onTimeRate - a.onTimeRate || b.totalDeliveries - a.totalDeliveries);
+
+    // In-transit with ETA tracking
+    const inTransit = await ctx.db
+      .query("transfers")
+      .withIndex("by_status", (q) => q.eq("status", "inTransit"))
+      .collect();
+
+    const now = Date.now();
+    const activeDeliveries = await Promise.all(
+      inTransit
+        .filter((t) => t.driverId)
+        .map(async (t) => {
+          const driver = driverMap.get(t.driverId as string);
+          const toName = await getBranchName(t.toBranchId);
+          const isOverdue = t.expectedDeliveryDate ? now > t.expectedDeliveryDate : false;
+          const daysOverdue = t.expectedDeliveryDate && isOverdue
+            ? Math.ceil((now - t.expectedDeliveryDate) / 86_400_000)
+            : 0;
+
+          return {
+            transferId: t._id as string,
+            driverName: driver?.name ?? "Unknown",
+            toBranchName: toName,
+            shippedAt: t.shippedAt ?? 0,
+            expectedDeliveryDate: t.expectedDeliveryDate ?? null,
+            expectedDeliveryDays: t.expectedDeliveryDays ?? null,
+            isOverdue,
+            daysOverdue,
+            driverArrived: !!t.driverArrivedAt,
+          };
+        })
+    );
+
+    return {
+      rankings,
+      activeDeliveries: activeDeliveries.sort((a, b) =>
+        (b.isOverdue ? 1 : 0) - (a.isOverdue ? 1 : 0) || (a.expectedDeliveryDate ?? Infinity) - (b.expectedDeliveryDate ?? Infinity)
+      ),
+      totalDeliveriesInPeriod: recentDriverDeliveries.length,
+      overallOnTimeRate: recentDriverDeliveries.length > 0
+        ? Math.round(
+            (recentDriverDeliveries.filter((t) =>
+              !t.expectedDeliveryDate || (t.deliveredAt ?? 0) <= t.expectedDeliveryDate
+            ).length / recentDriverDeliveries.length) * 100
+          )
+        : 100,
+    };
   },
 });

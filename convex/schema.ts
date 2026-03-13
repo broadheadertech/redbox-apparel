@@ -129,6 +129,7 @@ export default defineSchema({
     reservedQuantity: v.optional(v.number()),
     quarantinedQuantity: v.optional(v.number()),
     lowStockThreshold: v.optional(v.number()),
+    arrivedAt: v.optional(v.number()), // when stock last arrived at this branch
     updatedAt: v.number(),
   })
     .index("by_branch", ["branchId"])
@@ -185,6 +186,11 @@ export default defineSchema({
       method: v.union(v.literal("cash"), v.literal("gcash"), v.literal("maya")),
       amountCentavos: v.number(),
     })),
+    fashionAssistantId: v.optional(v.id("fashionAssistants")),
+    status: v.optional(v.union(v.literal("completed"), v.literal("voided"))),
+    voidedAt: v.optional(v.number()),
+    voidedById: v.optional(v.id("users")),
+    voidReason: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_branch", ["branchId"])
@@ -206,7 +212,7 @@ export default defineSchema({
     fromBranchId: v.id("branches"),
     toBranchId: v.id("branches"),
     requestedById: v.id("users"),
-    type: v.optional(v.union(v.literal("stockRequest"), v.literal("return"))),
+    type: v.optional(v.union(v.literal("stockRequest"), v.literal("return"), v.literal("interBranch"))),
     status: v.union(
       v.literal("requested"),
       v.literal("approved"),
@@ -225,6 +231,8 @@ export default defineSchema({
     deliveredById: v.optional(v.id("users")),
     driverId: v.optional(v.id("users")),
     driverArrivedAt: v.optional(v.number()),
+    expectedDeliveryDays: v.optional(v.number()),  // warehouse sets how many days
+    expectedDeliveryDate: v.optional(v.number()),   // computed: shippedAt + days
     createdAt: v.number(),
     updatedAt: v.number(),
     approvedById: v.optional(v.id("users")),
@@ -248,6 +256,38 @@ export default defineSchema({
     receivedQuantity: v.optional(v.number()),
     damageNotes: v.optional(v.string()),
   }).index("by_transfer", ["transferId"]),
+
+  transferBoxes: defineTable({
+    transferId: v.id("transfers"),
+    boxNumber: v.number(),             // sequential: 1, 2, 3...
+    boxCode: v.string(),               // unique QR/barcode: e.g. "TRF-abc123-BOX-001"
+    totalItems: v.number(),            // count of items in this box
+    sealedAt: v.optional(v.number()),  // when box was sealed/finalized
+    sealedById: v.optional(v.id("users")),
+    receivedAt: v.optional(v.number()),
+    receivedById: v.optional(v.id("users")),
+    status: v.union(
+      v.literal("packing"),            // items being scanned in
+      v.literal("sealed"),             // finalized, ready for transit
+      v.literal("received"),           // branch confirmed receipt
+      v.literal("discrepancy")         // branch found issues
+    ),
+    discrepancyNotes: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_transfer", ["transferId"])
+    .index("by_boxCode", ["boxCode"]),
+
+  transferBoxItems: defineTable({
+    boxId: v.id("transferBoxes"),
+    transferId: v.id("transfers"),     // denormalized for easy queries
+    variantId: v.id("variants"),
+    quantity: v.number(),
+    scannedAt: v.number(),
+    scannedById: v.id("users"),
+  })
+    .index("by_box", ["boxId"])
+    .index("by_transfer", ["transferId"]),
 
   internalInvoices: defineTable({
     transferId: v.id("transfers"),
@@ -451,18 +491,42 @@ export default defineSchema({
     .index("by_branch_variant_received", ["branchId", "variantId", "receivedAt"])
     .index("by_branch_variant", ["branchId", "variantId"]),
 
+  cashierAccounts: defineTable({
+    branchId: v.id("branches"),
+    firstName: v.string(),
+    lastName: v.string(),
+    username: v.string(),
+    passwordHash: v.string(),
+    passwordSalt: v.string(),
+    isActive: v.boolean(),
+    createdById: v.id("users"),
+    createdAt: v.number(),
+  })
+    .index("by_branch", ["branchId"])
+    .index("by_branch_username", ["branchId", "username"])
+    .index("by_branch_isActive", ["branchId", "isActive"]),
+
   cashierShifts: defineTable({
     branchId: v.id("branches"),
     cashierId: v.id("users"),
+    cashierAccountId: v.optional(v.id("cashierAccounts")),
+    changeFundCentavos: v.optional(v.number()),
     cashFundCentavos: v.number(),
     status: v.union(v.literal("open"), v.literal("closed")),
     openedAt: v.number(),
     closedAt: v.optional(v.number()),
+    closeType: v.optional(v.union(v.literal("turnover"), v.literal("endOfDay"))),
     closedCashBalanceCentavos: v.optional(v.number()),
     notes: v.optional(v.string()),
+    prevShiftId: v.optional(v.id("cashierShifts")),
+    handoverCashInRegisterCentavos: v.optional(v.number()),
+    handoverChangeFundCentavos: v.optional(v.number()),
+    handoverCashFundCentavos: v.optional(v.number()),
   })
     .index("by_branch_status", ["branchId", "status"])
+    .index("by_branch_opened", ["branchId", "openedAt"])
     .index("by_cashier_status", ["cashierId", "status"])
+    .index("by_cashierAccount", ["cashierAccountId"])
     .index("by_branch_cashier", ["branchId", "cashierId"]),
 
   promotions: defineTable({
@@ -472,7 +536,9 @@ export default defineSchema({
       v.literal("percentage"),
       v.literal("fixedAmount"),
       v.literal("buyXGetY"),
-      v.literal("tiered")
+      v.literal("tiered"),
+      v.literal("crossSell"),
+      v.literal("pwp")
     ),
     // percentage
     percentageValue: v.optional(v.number()),
@@ -502,6 +568,16 @@ export default defineSchema({
     sizes: v.optional(v.array(v.string())),
     // aging tier scope (empty/undefined = all stock)
     agingTiers: v.optional(v.array(v.union(v.literal("green"), v.literal("yellow"), v.literal("red")))),
+    // crossSell reward scope — products that get discounted when trigger scope items are in cart
+    crossSellRewardType: v.optional(v.union(v.literal("percentage"), v.literal("fixedAmount"))),
+    rewardBrandIds: v.optional(v.array(v.id("brands"))),
+    rewardCategoryIds: v.optional(v.array(v.id("categories"))),
+    rewardStyleIds: v.optional(v.array(v.id("styles"))),
+    rewardVariantIds: v.optional(v.array(v.id("variants"))),
+    // pwp (Purchase with Purchase) — buy X of trigger, get reward at special price
+    pwpTriggerMinQuantity: v.optional(v.number()),
+    pwpRewardVariantIds: v.optional(v.array(v.id("variants"))),
+    pwpRewardPriceCentavos: v.optional(v.number()),
     // date range (endDate optional = no expiration)
     startDate: v.number(),
     endDate: v.optional(v.number()),
@@ -1009,4 +1085,70 @@ export default defineSchema({
     completedAt: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_branch", ["branchId", "status"]),
+
+  tradingEvents: defineTable({
+    date: v.string(), // YYYYMMDD
+    name: v.string(),
+    type: v.union(
+      v.literal("promotion"),
+      v.literal("event"),
+      v.literal("closure"),
+      v.literal("note")
+    ),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+    createdById: v.id("users"),
+  }).index("by_date", ["date"]),
+
+  // ─── Staff / Internal Notifications ────────────────────────────────────────
+  staffNotifications: defineTable({
+    userId: v.id("users"),
+    type: v.union(
+      v.literal("transfer_requested"),
+      v.literal("transfer_approved"),
+      v.literal("transfer_rejected"),
+      v.literal("transfer_packed"),
+      v.literal("driver_assigned"),
+      v.literal("driver_in_transit"),
+      v.literal("driver_arrived"),
+      v.literal("driver_delivered"),
+      v.literal("transfer_confirmed"),
+      v.literal("transfer_cancelled")
+    ),
+    title: v.string(),
+    body: v.string(),
+    transferId: v.optional(v.id("transfers")),
+    isRead: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId", "createdAt"])
+    .index("by_user_unread", ["userId", "isRead"]),
+
+  // ─── Fashion Assistants ──────────────────────────────────────────────────────
+  fashionAssistants: defineTable({
+    name: v.string(),
+    branchId: v.id("branches"),
+    employeeCode: v.optional(v.string()), // optional internal ID / code
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    createdById: v.id("users"),
+  }).index("by_branch", ["branchId", "isActive"]),
+
+  // ─── Trading Calendar Reminder Dedup ────────────────────────────────────────
+  tradingReminders: defineTable({
+    key: v.string(), // "{YYYYMMDD}_{window}d" e.g. "20261225_7d"
+    sentAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  // ─── Cross-Sell Events ───────────────────────────────────────────────────────
+  // Logged whenever a cashier adds an item from the "Frequently Bought Together" strip.
+  crossSellEvents: defineTable({
+    branchId: v.id("branches"),
+    suggestedVariantId: v.id("variants"),
+    cartVariantIds: v.array(v.id("variants")), // items in cart that triggered the suggestion
+    priceCentavos: v.number(), // price at time of acceptance
+    createdAt: v.number(),
+  })
+    .index("by_branch_date", ["branchId", "createdAt"])
+    .index("by_date", ["createdAt"]),
 });

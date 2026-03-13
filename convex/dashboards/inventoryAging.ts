@@ -2,6 +2,7 @@ import { query, type QueryCtx } from "../_generated/server";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
+import { withBranchScope } from "../_helpers/withBranchScope";
 
 // ─── Aging tier config ───────────────────────────────────────────────────────
 
@@ -225,6 +226,150 @@ export const getAgingReport = query({
     });
 
     // Summary totals
+    let greenSkus = 0, yellowSkus = 0, redSkus = 0;
+    let totalCostCentavos = 0, greenCostCentavos = 0, yellowCostCentavos = 0, redCostCentavos = 0;
+    let totalUnits = 0;
+    for (const item of items) {
+      if (item.dominantTier === "green") greenSkus++;
+      else if (item.dominantTier === "yellow") yellowSkus++;
+      else redSkus++;
+      totalCostCentavos += item.totalCostCentavos;
+      greenCostCentavos += item.greenCostCentavos;
+      yellowCostCentavos += item.yellowCostCentavos;
+      redCostCentavos += item.redCostCentavos;
+      totalUnits += item.totalQty;
+    }
+
+    return {
+      items,
+      summary: {
+        totalSkus: items.length,
+        greenSkus,
+        yellowSkus,
+        redSkus,
+        totalUnits,
+        totalCostCentavos,
+        greenCostCentavos,
+        yellowCostCentavos,
+        redCostCentavos,
+        atRiskCostCentavos: yellowCostCentavos + redCostCentavos,
+      },
+    };
+  },
+});
+
+// ─── getBranchAgingReport (branch-scoped) ──────────────────────────────────
+
+export const getBranchAgingReport = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await withBranchScope(ctx);
+    if (!scope.branchId) {
+      throw new Error("Branch scope required");
+    }
+
+    const entries = await aggregateAging(ctx, { branchId: scope.branchId });
+
+    // 4-wave enrichment (same as HQ)
+    const uniqueVariantIds = [...new Set(entries.map((e) => e.variantId))];
+    const variantDocs = await Promise.all(
+      uniqueVariantIds.map((id) => ctx.db.get(id as Id<"variants">))
+    );
+    const variantMap = new Map<
+      string,
+      { sku: string; size: string; color: string; priceCentavos: number; styleId: Id<"styles"> }
+    >();
+    uniqueVariantIds.forEach((id, i) => {
+      const doc = variantDocs[i];
+      if (doc) {
+        variantMap.set(id, {
+          sku: doc.sku ?? "—",
+          size: doc.size ?? "—",
+          color: doc.color ?? "—",
+          priceCentavos: doc.priceCentavos ?? 0,
+          styleId: doc.styleId,
+        });
+      }
+    });
+
+    const uniqueStyleIds = [...new Set(
+      Array.from(variantMap.values()).map((v) => v.styleId)
+    )];
+    const styleDocs = await Promise.all(
+      uniqueStyleIds.map((id) => ctx.db.get(id))
+    );
+    const styleMap = new Map<string, { name: string; categoryId: Id<"categories"> }>();
+    uniqueStyleIds.forEach((id, i) => {
+      const doc = styleDocs[i];
+      if (doc) styleMap.set(id as string, { name: doc.name, categoryId: doc.categoryId });
+    });
+
+    const uniqueCategoryIds = [...new Set(
+      Array.from(styleMap.values()).map((s) => s.categoryId)
+    )];
+    const categoryDocs = await Promise.all(
+      uniqueCategoryIds.map((id) => ctx.db.get(id))
+    );
+    const categoryMap = new Map<string, { name: string; brandId: Id<"brands"> }>();
+    uniqueCategoryIds.forEach((id, i) => {
+      const doc = categoryDocs[i];
+      if (doc) categoryMap.set(id as string, { name: doc.name, brandId: doc.brandId });
+    });
+
+    const uniqueBrandIds = [...new Set(
+      Array.from(categoryMap.values()).map((c) => c.brandId)
+    )];
+    const brandDocs = await Promise.all(
+      uniqueBrandIds.map((id) => ctx.db.get(id))
+    );
+    const brandNameMap = new Map<string, string>();
+    uniqueBrandIds.forEach((id, i) => {
+      const doc = brandDocs[i];
+      if (doc) brandNameMap.set(id as string, doc.name);
+    });
+
+    const items = entries.map((entry) => {
+      const variant = variantMap.get(entry.variantId);
+      const style = variant ? styleMap.get(variant.styleId as string) : null;
+      const category = style ? categoryMap.get(style.categoryId as string) : null;
+      const brandName = category ? brandNameMap.get(category.brandId as string) ?? "Unknown" : "Unknown";
+
+      const weightedAvgAge = entry.totalQty > 0
+        ? Math.round(entry.weightedAgeDaysSum / entry.totalQty)
+        : 0;
+
+      const dominantTier: AgingTier =
+        entry.redQty > 0 ? "red" :
+        entry.yellowQty > 0 ? "yellow" : "green";
+
+      return {
+        variantId: entry.variantId,
+        sku: variant?.sku ?? "—",
+        styleName: style?.name ?? "Unknown",
+        size: variant?.size ?? "—",
+        color: variant?.color ?? "—",
+        brandName,
+        categoryName: category?.name ?? "Unknown",
+        totalQty: entry.totalQty,
+        greenQty: entry.greenQty,
+        yellowQty: entry.yellowQty,
+        redQty: entry.redQty,
+        totalCostCentavos: entry.totalCostCentavos,
+        greenCostCentavos: entry.greenCostCentavos,
+        yellowCostCentavos: entry.yellowCostCentavos,
+        redCostCentavos: entry.redCostCentavos,
+        oldestAgeDays: entry.oldestAgeDays,
+        weightedAvgAge,
+        dominantTier,
+      };
+    });
+
+    items.sort((a, b) => {
+      const tierDiff = TIER_PRIORITY[a.dominantTier] - TIER_PRIORITY[b.dominantTier];
+      if (tierDiff !== 0) return tierDiff;
+      return b.oldestAgeDays - a.oldestAgeDays;
+    });
+
     let greenSkus = 0, yellowSkus = 0, redSkus = 0;
     let totalCostCentavos = 0, greenCostCentavos = 0, yellowCostCentavos = 0, redCostCentavos = 0;
     let totalUnits = 0;

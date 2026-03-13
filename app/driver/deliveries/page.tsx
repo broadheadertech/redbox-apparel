@@ -227,13 +227,39 @@ function DeliveryDetail({
               <span className="text-muted-foreground">Items:</span>{" "}
               {detail.itemCount} {detail.itemCount === 1 ? "item" : "items"}
             </p>
+            <p className="text-sm">
+              <span className="text-muted-foreground">Mode:</span>{" "}
+              {detail.deliveryMode === "box"
+                ? `${detail.boxes.length} ${detail.boxes.length === 1 ? "box" : "boxes"}`
+                : "By piece"}
+            </p>
             <p className="text-sm font-mono text-muted-foreground">
               ID: {detail.transferId.slice(-8)}
             </p>
           </div>
         </div>
 
-        {/* Items list */}
+        {/* Box list (box mode) */}
+        {detail.deliveryMode === "box" && detail.boxes.length > 0 && (
+          <div className="rounded-lg border bg-card p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Boxes
+            </p>
+            <div className="mt-2 divide-y">
+              {detail.boxes.map((box) => (
+                <div key={box.boxCode} className="py-2 first:pt-0 last:pb-0 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Box {box.boxNumber}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{box.boxCode}</p>
+                  </div>
+                  <span className="text-sm text-muted-foreground">{box.totalItems} pcs</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Items list (piece mode or always visible) */}
         <div className="rounded-lg border bg-card p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Items

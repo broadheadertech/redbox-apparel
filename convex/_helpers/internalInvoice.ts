@@ -20,14 +20,11 @@ function getPhilippineDate(): { datePart: string; startOfDayMs: number } {
 }
 
 /**
- * Generate an internal invoice for a delivered transfer.
+ * Generate an internal invoice (packing slip / transfer receipt) for a delivered transfer.
  *
- * Called from both confirmTransferDelivery and driverConfirmDelivery.
- * Uses receivedQuantity to determine billing amounts.
+ * Called from confirmTransferDelivery, driverConfirmDelivery, and confirmBoxReceipt.
+ * NO prices — this is purely a stock transfer receipt listing items (and boxes if applicable).
  * Idempotent: skips if an invoice already exists for this transfer.
- *
- * Prices use costPriceCentavos (base/wholesale price). Falls back to
- * priceCentavos (SRP) when cost price hasn't been set on a variant.
  */
 export async function generateInternalInvoice(
   ctx: MutationCtx,
@@ -51,33 +48,19 @@ export async function generateInternalInvoice(
     .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
     .collect();
 
-  let subtotalCentavos = 0;
-
   const lineItems: {
     variantId: Id<"variants">;
     quantity: number;
-    unitCostCentavos: number;
-    lineTotalCentavos: number;
   }[] = [];
 
   for (const item of transferItems) {
-    const qty = item.receivedQuantity ?? 0;
+    const qty = item.receivedQuantity ?? item.packedQuantity ?? 0;
     if (qty <= 0) continue;
-
-    const variant = await ctx.db.get(item.variantId);
-    // Use cost price if set; fall back to SRP
-    const unitCost = variant?.costPriceCentavos ?? variant?.priceCentavos ?? 0;
-
-    const lineTotal = unitCost * qty;
 
     lineItems.push({
       variantId: item.variantId,
       quantity: qty,
-      unitCostCentavos: unitCost,
-      lineTotalCentavos: lineTotal,
     });
-
-    subtotalCentavos += lineTotal;
   }
 
   // Skip if nothing was received
@@ -92,28 +75,28 @@ export async function generateInternalInvoice(
   const seq = (todayInvoices.length + 1).toString().padStart(4, "0");
   const invoiceNumber = `INV-${datePart}-${seq}`;
 
-  // Insert invoice header
+  // Insert invoice header — no pricing, just transfer receipt
   const invoiceId = await ctx.db.insert("internalInvoices", {
     transferId: args.transferId,
     fromBranchId: args.fromBranchId,
     toBranchId: args.toBranchId,
     invoiceNumber,
-    subtotalCentavos,
+    subtotalCentavos: 0,
     vatAmountCentavos: 0,
-    totalCentavos: subtotalCentavos,
+    totalCentavos: 0,
     status: "generated" as const,
     generatedById: args.userId,
     createdAt: Date.now(),
   });
 
-  // Insert line items
+  // Insert line items — no pricing
   for (const line of lineItems) {
     await ctx.db.insert("internalInvoiceItems", {
       invoiceId,
       variantId: line.variantId,
       quantity: line.quantity,
-      unitCostCentavos: line.unitCostCentavos,
-      lineTotalCentavos: line.lineTotalCentavos,
+      unitCostCentavos: 0,
+      lineTotalCentavos: 0,
     });
   }
 

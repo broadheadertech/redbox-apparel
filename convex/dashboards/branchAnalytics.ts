@@ -837,3 +837,92 @@ export const getDemandForecast = query({
     return forecast;
   },
 });
+
+// ─── getDailyRevenueTrend ────────────────────────────────────────────────────
+// Day-by-day revenue for selected period vs prior period of the same length.
+// Returns one entry per day with PHT-aligned day boundaries.
+
+export const getDailyRevenueTrend = query({
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+    const branchId = scope.branchId;
+    if (!branchId) return null;
+
+    const { startMs, endMs, durationMs } = resolvePeriod(args);
+    const prevStartMs = startMs - durationMs;
+
+    const branch = await ctx.db.get(branchId);
+    const isWarehouse = branch?.type === "warehouse";
+
+    // Build day buckets for current + prior period
+    function buildDayBuckets(start: number, end: number): number[] {
+      const buckets: number[] = [];
+      let cursor = start;
+      while (cursor < end) {
+        buckets.push(cursor);
+        cursor += DAY_MS;
+      }
+      return buckets;
+    }
+
+    const currentDays = buildDayBuckets(startMs, endMs);
+    const dayCount = currentDays.length;
+
+    // Fetch all transactions (or invoices for warehouse) covering both periods
+    let dayRevenue: (day: number, transactions: { createdAt: number; totalCentavos: number }[]) => number;
+    let allRecords: { createdAt: number; totalCentavos: number }[];
+
+    if (isWarehouse) {
+      const invoices = await ctx.db
+        .query("internalInvoices")
+        .withIndex("by_createdAt", (q) => q.gte("createdAt", prevStartMs))
+        .collect();
+      allRecords = invoices
+        .filter((inv) => (inv.fromBranchId as string) === (branchId as string))
+        .map((inv) => ({ createdAt: inv.createdAt, totalCentavos: inv.totalCentavos }));
+    } else {
+      allRecords = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branchId).gte("createdAt", prevStartMs)
+        )
+        .collect();
+    }
+
+    dayRevenue = (dayStart, records) => {
+      const dayEnd = dayStart + DAY_MS;
+      return records
+        .filter((r) => r.createdAt >= dayStart && r.createdAt < dayEnd)
+        .reduce((s, r) => s + r.totalCentavos, 0);
+    };
+
+    // Format day label based on period length
+    function formatLabel(dayStartMs: number, totalDays: number): string {
+      const d = new Date(dayStartMs + PHT_OFFSET_MS);
+      if (totalDays <= 7) {
+        return d.toLocaleDateString("en-PH", { timeZone: "UTC", weekday: "short" });
+      }
+      if (totalDays <= 35) {
+        return d.toLocaleDateString("en-PH", { timeZone: "UTC", month: "short", day: "numeric" });
+      }
+      // yearly: group by week or month
+      return d.toLocaleDateString("en-PH", { timeZone: "UTC", month: "short", day: "numeric" });
+    }
+
+    const trend = currentDays.map((dayStart, i) => {
+      const priorDayStart = prevStartMs + i * DAY_MS;
+      return {
+        label: formatLabel(dayStart, dayCount),
+        dayMs: dayStart,
+        currentCentavos: dayRevenue(dayStart, allRecords),
+        priorCentavos: dayRevenue(priorDayStart, allRecords),
+      };
+    });
+
+    return { trend, isWarehouse };
+  },
+});

@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   BarChart3, Search, ScanBarcode, ChevronDown, ChevronUp, MessageSquarePlus,
-  Zap, TrendingDown, Minus, Skull, Loader2, X,
+  Zap, TrendingDown, Minus, Skull, Loader2, X, Clock,
 } from "lucide-react";
 
 const PERIOD_OPTIONS = [
@@ -40,6 +40,12 @@ const CLASS_COLORS: Record<string, string> = {
   mid: "bg-amber-500/10 text-amber-600 border-amber-500/30",
   slow: "bg-red-500/10 text-red-600 border-red-500/30",
   dead: "bg-gray-500/10 text-gray-500 border-gray-500/30",
+};
+
+const AGING_COLORS: Record<string, string> = {
+  green: "text-green-600",
+  yellow: "text-amber-600",
+  red: "text-red-600",
 };
 
 const CLASS_ICONS: Record<string, React.ReactNode> = {
@@ -380,6 +386,7 @@ export default function SellThroughPage() {
                 <TableHead className="text-right">SOLD</TableHead>
                 <TableHead className="text-right">Sell-Thru %</TableHead>
                 <TableHead>Class</TableHead>
+                <TableHead className="text-right">Avg Age</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -426,6 +433,14 @@ export default function SellThroughPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
+                        <span className={cn(
+                          "tabular-nums text-sm",
+                          AGING_COLORS[item.agingTier]
+                        )}>
+                          {item.avgAgeDays}d
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -449,7 +464,7 @@ export default function SellThroughPage() {
                     {/* Expanded Branch Breakdown */}
                     {isExpanded && item.branchBreakdown.length > 0 && (
                       <TableRow key={`${item.styleId}-expanded`}>
-                        <TableCell colSpan={9} className="bg-muted/30 p-0">
+                        <TableCell colSpan={10} className="bg-muted/30 p-0">
                           <div className="px-6 py-3">
                             <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wider">
                               Branch Ranking (Best → Worst)

@@ -25,14 +25,17 @@ import {
   Sparkles,
   Ruler,
   MapPin,
-  Calendar,
   Megaphone,
   Flame,
+  Clock,
+  Timer,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
 
 const ALLOWED_ROLES = ["admin"] as const;
 
@@ -64,10 +67,13 @@ const managementNavItems: NavItem[] = [
   { href: "/admin/hot-deals", label: "Hot Deals", icon: Flame, roles: ["admin"] },
   { href: "/admin/drops", label: "Exclusive Drops", icon: Sparkles, roles: ["admin"] },
   { href: "/admin/sell-through", label: "Sell-Through", icon: BarChart3, roles: ["admin"] },
+  { href: "/admin/inventory-aging", label: "Inventory Aging", icon: Clock, roles: ["admin"] },
+  { href: "/admin/fulfillment-speed", label: "Fulfillment Speed", icon: Timer, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
   { href: "/admin/size-curves", label: "Size Curves", icon: Ruler, roles: ["admin"] },
   { href: "/admin/expansion", label: "Expansion Intel", icon: MapPin, roles: ["admin"] },
-  { href: "/admin/holidays", label: "Holiday Forecast", icon: Calendar, roles: ["admin"] },
+  { href: "/admin/trading-calendar", label: "Trading Calendar", icon: CalendarDays, roles: ["admin"] },
+  { href: "/admin/cross-sell-analytics", label: "Cross-Sell", icon: Sparkles, roles: ["admin"] },
 ];
 
 function NavSection({
@@ -157,7 +163,7 @@ export default function AdminLayout({
     <ErrorBoundary>
       <div className="theme-dashboard flex min-h-screen">
         {/* Sidebar */}
-        <aside className="w-60 border-r bg-gray-50/50">
+        <aside className="w-60 border-r bg-gray-50/50 print:hidden">
           <div className="p-4">
             {siteAssets?.siteLogoUrl ? (
               <Image
@@ -170,7 +176,10 @@ export default function AdminLayout({
             ) : (
               <h2 className="text-lg font-semibold">Admin Panel</h2>
             )}
-            <p className="text-sm text-muted-foreground">{currentUser.name}</p>
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-sm text-muted-foreground">{currentUser.name}</p>
+              <StaffNotificationBell />
+            </div>
           </div>
           <Separator />
           <nav className="p-2 space-y-1">

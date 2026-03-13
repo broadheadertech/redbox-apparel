@@ -12,6 +12,12 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
+  PieChart,
+  Pie,
+  LineChart,
+  Line,
+  CartesianGrid,
+  Legend,
 } from "recharts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -178,14 +184,45 @@ const MI_COLORS = {
 
 // ─── Tab Types ────────────────────────────────────────────────────────────────
 
-type AnalyticsTab = "descriptive" | "diagnostic" | "predictive" | "prescriptive";
+type AnalyticsTab = "descriptive" | "comparisons" | "diagnostic" | "predictive" | "prescriptive";
 
 const ANALYTICS_TABS: { value: AnalyticsTab; label: string; description: string }[] = [
   { value: "descriptive", label: "Descriptive", description: "What happened" },
+  { value: "comparisons", label: "Comparisons", description: "Brand vs Category vs Product" },
   { value: "diagnostic", label: "Diagnostic", description: "Why it happened" },
   { value: "predictive", label: "Predictive", description: "What will happen" },
   { value: "prescriptive", label: "Prescriptive", description: "Smart alerts & intelligence" },
 ];
+
+// ─── Comparison chart colors ─────────────────────────────────────────────────
+
+const CHART_COLORS = [
+  "hsl(var(--primary))",
+  "#3b82f6",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#ec4899",
+  "#14b8a6",
+  "#f97316",
+  "#6366f1",
+];
+
+const VERDICT_COLORS = {
+  restock: "bg-green-100 text-green-800 border-green-200",
+  lay_low: "bg-red-100 text-red-800 border-red-200",
+  hold: "bg-gray-100 text-gray-800 border-gray-200",
+};
+
+const VERDICT_LABELS = {
+  restock: "Restock",
+  lay_low: "Lay Low",
+  hold: "Hold",
+};
+
+type ComparisonView = "brand" | "category" | "product";
+type ComparisonMetric = "units" | "revenue";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Page
@@ -195,6 +232,9 @@ export default function HQAnalyticsPage() {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>("descriptive");
   const [datePreset, setDatePreset] = useState<DatePreset>("weekly");
   const [velocityDays, setVelocityDays] = useState<(typeof VELOCITY_DAYS)[number]>(7);
+  const [comparisonView, setComparisonView] = useState<ComparisonView>("brand");
+  const [comparisonMetric, setComparisonMetric] = useState<ComparisonMetric>("units");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
   const { startMs, endMs, label: periodLabel } = useMemo(() => getPresetMs(datePreset), [datePreset]);
 
@@ -277,6 +317,44 @@ export default function HQAnalyticsPage() {
   const fulfillmentComparison = useQuery(
     api.dashboards.hqIntelligence.getFulfillmentSpeedComparison,
     activeTab === "prescriptive" ? {} : "skip"
+  );
+
+  // Comparisons tab
+  const topBrands = useQuery(
+    api.dashboards.comparisonAnalytics.getHQTopBrandsComparison,
+    activeTab === "comparisons" ? { startMs, endMs } : "skip"
+  );
+  const topCategories = useQuery(
+    api.dashboards.comparisonAnalytics.getHQTopCategoriesComparison,
+    activeTab === "comparisons" ? { startMs, endMs } : "skip"
+  );
+  const topProductsComparison = useQuery(
+    api.dashboards.comparisonAnalytics.getHQTopProductsComparison,
+    activeTab === "comparisons" ? { startMs, endMs } : "skip"
+  );
+
+  // Descriptive — category donut
+  const salesByCategory = useQuery(
+    api.dashboards.comparisonAnalytics.getHQSalesByCategory,
+    activeTab === "descriptive" ? { startMs, endMs } : "skip"
+  );
+  const salesBySubcategory = useQuery(
+    api.dashboards.comparisonAnalytics.getHQSalesBySubcategory,
+    activeTab === "descriptive" && selectedCategoryId
+      ? { categoryId: selectedCategoryId as any, startMs, endMs }
+      : "skip"
+  );
+
+  // Diagnostic — restock vs lay low
+  const restockVsLayLow = useQuery(
+    api.dashboards.comparisonAnalytics.getHQRestockVsLayLow,
+    activeTab === "diagnostic" ? { startMs, endMs } : "skip"
+  );
+
+  // Descriptive — daily revenue trend
+  const dailyTrend = useQuery(
+    api.dashboards.hqDdpAnalytics.getHQDailyRevenueTrend,
+    activeTab === "descriptive" ? { startMs, endMs } : "skip"
   );
 
   const todayLabel = new Date().toLocaleDateString("en-PH", {
@@ -513,6 +591,361 @@ export default function HQAnalyticsPage() {
               </div>
             </div>
           </div>
+
+          {/* Daily Revenue Trend */}
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold">Revenue Trend ({periodLabel})</h3>
+              <p className="text-xs text-muted-foreground">Current period vs prior period of the same length — across all retail branches</p>
+            </div>
+            {dailyTrend === undefined ? (
+              <Skeleton className="h-56" />
+            ) : !dailyTrend || dailyTrend.trend.length === 0 ? (
+              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                No trend data for this period
+              </div>
+            ) : (
+              <div className="rounded-lg border bg-card p-4">
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={dailyTrend.trend} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                    <YAxis
+                      tick={{ fontSize: 10 }}
+                      tickFormatter={(v) => `₱${(v / 100).toLocaleString("en-PH", { notation: "compact", maximumFractionDigits: 1 })}`}
+                      width={56}
+                    />
+                    <Tooltip
+                      formatter={(value: number | undefined, name: string | undefined) => [
+                        value !== undefined ? formatCentavos(value) : "—",
+                        name === "currentCentavos" ? "This Period" : "Prior Period",
+                      ]}
+                    />
+                    <Legend
+                      formatter={(value) => value === "currentCentavos" ? "This Period" : "Prior Period"}
+                      wrapperStyle={{ fontSize: 11 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="currentCentavos"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="priorCentavos"
+                      stroke="hsl(var(--muted-foreground))"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 2"
+                      dot={false}
+                      activeDot={{ r: 3 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+
+          {/* Sales by Category Donut */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold">Sales by Category ({periodLabel})</h3>
+            {salesByCategory === undefined ? (
+              <Skeleton className="h-64" />
+            ) : !salesByCategory || salesByCategory.length === 0 ? (
+              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                No category data for this period
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="rounded-lg border bg-card p-4">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={salesByCategory.map((c) => ({
+                          name: c.name,
+                          value: c.revenueCentavos,
+                          units: c.unitsSold,
+                        }))}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={110}
+                        dataKey="value"
+                        nameKey="name"
+                        onClick={(entry: any) => {
+                          const cat = salesByCategory.find((c) => c.name === entry.name);
+                          if (cat) setSelectedCategoryId(selectedCategoryId === cat.categoryId ? null : cat.categoryId);
+                        }}
+                        style={{ cursor: "pointer" }}
+                      >
+                        {salesByCategory.map((_, i) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: any) => [formatCentavos(value), "Revenue"]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="flex flex-wrap gap-3 justify-center mt-2">
+                    {salesByCategory.map((c, i) => (
+                      <button
+                        key={c.categoryId}
+                        onClick={() => setSelectedCategoryId(selectedCategoryId === c.categoryId ? null : c.categoryId)}
+                        className={cn(
+                          "flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors",
+                          selectedCategoryId === c.categoryId ? "bg-muted font-medium" : "hover:bg-muted/50"
+                        )}
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                        />
+                        {c.name} ({c.percentage}%)
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Category detail / subcategory drill-down */}
+                <div className="space-y-3">
+                  {selectedCategoryId ? (
+                    <>
+                      <h4 className="text-sm font-semibold">
+                        {salesByCategory.find((c) => c.categoryId === selectedCategoryId)?.name} — Styles
+                      </h4>
+                      {salesBySubcategory === undefined ? (
+                        <Skeleton className="h-48" />
+                      ) : !salesBySubcategory || salesBySubcategory.length === 0 ? (
+                        <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                          No style data for this category
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border overflow-hidden">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-muted/50 border-b">
+                                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Style</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">%</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {salesBySubcategory.map((s, i) => (
+                                <tr key={i} className="border-b last:border-0">
+                                  <td className="px-3 py-2 font-medium">{s.name}</td>
+                                  <td className="px-3 py-2 text-right">{s.unitsSold}</td>
+                                  <td className="px-3 py-2 text-right">{formatCentavos(s.revenueCentavos)}</td>
+                                  <td className="px-3 py-2 text-right text-muted-foreground">{s.percentage}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="rounded-lg border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/50 border-b">
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Category</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">%</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {salesByCategory.map((c) => (
+                            <tr
+                              key={c.categoryId}
+                              className="border-b last:border-0 cursor-pointer hover:bg-muted/30"
+                              onClick={() => setSelectedCategoryId(c.categoryId)}
+                            >
+                              <td className="px-3 py-2 font-medium">{c.name}</td>
+                              <td className="px-3 py-2 text-right">{c.unitsSold}</td>
+                              <td className="px-3 py-2 text-right">{formatCentavos(c.revenueCentavos)}</td>
+                              <td className="px-3 py-2 text-right text-muted-foreground">{c.percentage}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ COMPARISONS TAB ═══════════════════════════════════════════════ */}
+      {activeTab === "comparisons" && (
+        <div className="space-y-6">
+          {/* View toggles */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex gap-1 rounded-lg border p-1">
+              {([
+                { value: "brand" as const, label: "By Brand" },
+                { value: "category" as const, label: "By Category" },
+                { value: "product" as const, label: "By Product" },
+              ]).map((v) => (
+                <button
+                  key={v.value}
+                  onClick={() => setComparisonView(v.value)}
+                  className={cn(
+                    "px-3 py-1.5 text-xs rounded-md font-medium transition-colors",
+                    comparisonView === v.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  )}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1 rounded-lg border p-1">
+              {([
+                { value: "units" as const, label: "Units Sold" },
+                { value: "revenue" as const, label: "Revenue" },
+              ]).map((m) => (
+                <button
+                  key={m.value}
+                  onClick={() => setComparisonMetric(m.value)}
+                  className={cn(
+                    "px-3 py-1.5 text-xs rounded-md font-medium transition-colors",
+                    comparisonMetric === m.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Chart + Table */}
+          {(() => {
+            const data =
+              comparisonView === "brand"
+                ? topBrands
+                : comparisonView === "category"
+                  ? topCategories
+                  : topProductsComparison;
+
+            if (data === undefined) return <Skeleton className="h-80" />;
+            if (!data || data.length === 0)
+              return (
+                <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
+                  No data for this period
+                </div>
+              );
+
+            const chartData = data.map((item: any) => ({
+              name: item.name.length > 18 ? item.name.slice(0, 18) + "…" : item.name,
+              fullName: item.name,
+              value: comparisonMetric === "units" ? item.unitsSold : item.revenueCentavos,
+              units: item.unitsSold,
+              revenue: item.revenueCentavos,
+              percent: comparisonMetric === "units" ? item.percentUnits : item.percentRevenue,
+            }));
+
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Bar chart */}
+                <div className="rounded-lg border bg-card p-4">
+                  <ResponsiveContainer width="100%" height={Math.max(300, chartData.length * 40)}>
+                    <BarChart
+                      data={chartData}
+                      layout="vertical"
+                      margin={{ top: 5, right: 30, left: 100, bottom: 5 }}
+                    >
+                      <XAxis type="number" hide />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        tick={{ fontSize: 11 }}
+                        width={100}
+                      />
+                      <Tooltip
+                        formatter={(value: any) => [
+                          comparisonMetric === "revenue" ? formatCentavos(value) : `${value} units`,
+                          comparisonMetric === "revenue" ? "Revenue" : "Units Sold",
+                        ]}
+                        labelFormatter={(label: any) => {
+                          const item = chartData.find((d: any) => d.name === label);
+                          return item?.fullName ?? label;
+                        }}
+                      />
+                      <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                        {chartData.map((_: any, i: number) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Table */}
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/50 border-b">
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">
+                          {comparisonView === "brand" ? "Brand" : comparisonView === "category" ? "Category" : "Product"}
+                        </th>
+                        {comparisonView === "product" && (
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">Brand</th>
+                        )}
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.map((item: any, i: number) => (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
+                          <td className="px-3 py-2 font-medium">
+                            {item.name}
+                            {comparisonView === "product" && item.categoryName && (
+                              <p className="text-muted-foreground">{item.categoryName}</p>
+                            )}
+                          </td>
+                          {comparisonView === "product" && (
+                            <td className="px-3 py-2 text-muted-foreground">{item.brandName}</td>
+                          )}
+                          <td className="px-3 py-2 text-right">{item.unitsSold}</td>
+                          <td className="px-3 py-2 text-right">{formatCentavos(item.revenueCentavos)}</td>
+                          <td className="px-3 py-2 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${comparisonMetric === "units" ? item.percentUnits : item.percentRevenue}%`,
+                                    backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+                                  }}
+                                />
+                              </div>
+                              <span className="text-muted-foreground w-8 text-right">
+                                {comparisonMetric === "units" ? item.percentUnits : item.percentRevenue}%
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -687,6 +1120,93 @@ export default function HQAnalyticsPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Restock vs Lay Low */}
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold">Restock vs Lay Low</h3>
+              <p className="text-xs text-muted-foreground">
+                Products classified by velocity and stock levels — what to restock and what to reduce
+              </p>
+            </div>
+
+            {restockVsLayLow === undefined ? (
+              <Skeleton className="h-60" />
+            ) : !restockVsLayLow ? (
+              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                No data available
+              </div>
+            ) : (
+              <>
+                {/* Summary cards */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="rounded-lg border bg-card p-4 text-center">
+                    <p className="text-2xl font-bold text-green-600">{restockVsLayLow.summary.restockCount}</p>
+                    <p className="text-xs text-muted-foreground">Need Restock</p>
+                  </div>
+                  <div className="rounded-lg border bg-card p-4 text-center">
+                    <p className="text-2xl font-bold text-red-600">{restockVsLayLow.summary.layLowCount}</p>
+                    <p className="text-xs text-muted-foreground">Lay Low</p>
+                  </div>
+                  <div className="rounded-lg border bg-card p-4 text-center">
+                    <p className="text-2xl font-bold text-gray-600">{restockVsLayLow.summary.holdCount}</p>
+                    <p className="text-xs text-muted-foreground">Hold</p>
+                  </div>
+                </div>
+
+                {/* Table */}
+                {restockVsLayLow.items.length === 0 ? (
+                  <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                    No items to display
+                  </div>
+                ) : (
+                  <div className="rounded-lg border overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/50 border-b">
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Brand</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sold</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Velocity</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Days Left</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sell-Through</th>
+                            <th className="text-center px-3 py-2 font-medium text-muted-foreground">Verdict</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {restockVsLayLow.items.map((item, i) => (
+                            <tr key={i} className="border-b last:border-0">
+                              <td className="px-3 py-2">
+                                <p className="font-medium">{item.name}</p>
+                                <p className="text-muted-foreground">{item.size} / {item.color}</p>
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground">{item.brandName}</td>
+                              <td className="px-3 py-2 text-right">{item.currentStock}</td>
+                              <td className="px-3 py-2 text-right">{item.unitsSold}</td>
+                              <td className="px-3 py-2 text-right">{item.velocity}/day</td>
+                              <td className="px-3 py-2 text-right">
+                                <span className={item.daysOfStock <= 7 ? "text-red-600 font-medium" : item.daysOfStock <= 14 ? "text-amber-600" : ""}>
+                                  {item.daysOfStock >= 999 ? "∞" : `${item.daysOfStock}d`}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right">{item.sellThrough}%</td>
+                              <td className="px-3 py-2 text-center">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${VERDICT_COLORS[item.verdict]}`}>
+                                  {VERDICT_LABELS[item.verdict]}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

@@ -772,3 +772,78 @@ export const getHQSalesForecast = query({
   },
 });
 
+// ─── getHQDailyRevenueTrend ───────────────────────────────────────────────────
+// Day-by-day revenue across all retail branches, current period vs prior period.
+
+export const getHQDailyRevenueTrend = query({
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const { startMs, endMs, durationMs } = resolvePeriod(args);
+    const prevStartMs = startMs - durationMs;
+
+    const branches = await ctx.db
+      .query("branches")
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .collect();
+    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+
+    const allTxns = (
+      await Promise.all(
+        retailBranches.map((branch) =>
+          ctx.db
+            .query("transactions")
+            .withIndex("by_branch_date", (q) =>
+              q.eq("branchId", branch._id).gte("createdAt", prevStartMs)
+            )
+            .collect()
+        )
+      )
+    ).flat();
+
+    function buildDayBuckets(start: number, end: number): number[] {
+      const buckets: number[] = [];
+      let cursor = start;
+      while (cursor < end) {
+        buckets.push(cursor);
+        cursor += DAY_MS;
+      }
+      return buckets;
+    }
+
+    function dayRevenue(dayStart: number): number {
+      const dayEnd = dayStart + DAY_MS;
+      return allTxns
+        .filter((t) => t.createdAt >= dayStart && t.createdAt < dayEnd)
+        .reduce((s, t) => s + t.totalCentavos, 0);
+    }
+
+    function formatLabel(dayStartMs: number, totalDays: number): string {
+      const d = new Date(dayStartMs + PHT_OFFSET_MS);
+      if (totalDays <= 7) {
+        return d.toLocaleDateString("en-PH", { timeZone: "UTC", weekday: "short" });
+      }
+      return d.toLocaleDateString("en-PH", { timeZone: "UTC", month: "short", day: "numeric" });
+    }
+
+    const currentDays = buildDayBuckets(startMs, endMs);
+    const dayCount = currentDays.length;
+
+    const trend = currentDays.map((dayStart, i) => {
+      const priorDayStart = prevStartMs + i * DAY_MS;
+      return {
+        label: formatLabel(dayStart, dayCount),
+        dayMs: dayStart,
+        currentCentavos: dayRevenue(dayStart),
+        priorCentavos: dayRevenue(priorDayStart),
+      };
+    });
+
+    return { trend, branchCount: retailBranches.length };
+  },
+});
+

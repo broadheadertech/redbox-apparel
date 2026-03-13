@@ -5,6 +5,7 @@ import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { clearReservedOnDelivery } from "../_helpers/transferStock";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
+import { internal } from "../_generated/api";
 
 // NOTE: Use requireRole (NOT withBranchScope) — warehouse staff handle all
 // cross-branch transfers, not limited to their own branch.
@@ -121,6 +122,7 @@ export const completeTransferPacking = mutation({
         packedQuantity: v.number(),
       })
     ),
+    expectedDeliveryDays: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, WAREHOUSE_ROLES);
@@ -189,6 +191,7 @@ export const completeTransferPacking = mutation({
       status: "packed",
       packedAt: now,
       packedById: user._id,
+      ...(args.expectedDeliveryDays ? { expectedDeliveryDays: args.expectedDeliveryDays } : {}),
       updatedAt: now,
     });
 
@@ -199,6 +202,11 @@ export const completeTransferPacking = mutation({
       entityId: args.transferId,
       before: { status: "approved" },
       after: { status: "packed", packedById: user._id },
+    });
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "transfer_packed",
+      transferId: args.transferId,
     });
   },
 });
@@ -257,10 +265,17 @@ export const markTransferInTransit = mutation({
     }
 
     const now = Date.now();
+
+    // Compute expected delivery date from expectedDeliveryDays set during packing
+    const expectedDeliveryDate = transfer.expectedDeliveryDays
+      ? now + transfer.expectedDeliveryDays * 86_400_000
+      : undefined;
+
     await ctx.db.patch(args.transferId, {
       status: "inTransit",
       shippedAt: now,
       shippedById: user._id,
+      ...(expectedDeliveryDate ? { expectedDeliveryDate } : {}),
       updatedAt: now,
     });
 
@@ -270,7 +285,7 @@ export const markTransferInTransit = mutation({
       entityType: "transfers",
       entityId: args.transferId,
       before: { status: "packed" },
-      after: { status: "inTransit", shippedById: user._id },
+      after: { status: "inTransit", shippedById: user._id, expectedDeliveryDate },
     });
   },
 });
@@ -297,6 +312,10 @@ export const listInTransitTransfers = query({
           .query("transferItems")
           .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
           .collect();
+        const boxes = await ctx.db
+          .query("transferBoxes")
+          .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+          .collect();
         return {
           _id: transfer._id,
           fromBranchName,
@@ -304,6 +323,8 @@ export const listInTransitTransfers = query({
           itemCount: items.length,
           shippedAt: transfer.shippedAt ?? null,
           createdAt: transfer.createdAt,
+          deliveryMode: boxes.length > 0 ? ("box" as const) : ("piece" as const),
+          boxCount: boxes.length,
         };
       })
     );
@@ -315,7 +336,7 @@ export const listInTransitTransfers = query({
 export const getTransferReceivingData = query({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    await requireRole(ctx, WAREHOUSE_ROLES);
+    await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
 
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
@@ -377,7 +398,7 @@ export const confirmTransferDelivery = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
+    const user = await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
 
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
@@ -456,6 +477,7 @@ export const confirmTransferDelivery = mutation({
         if (existing) {
           await ctx.db.patch(existing._id, {
             quantity: existing.quantity + item.receivedQuantity,
+            arrivedAt: now,
             updatedAt: now,
           });
         } else {
@@ -463,6 +485,7 @@ export const confirmTransferDelivery = mutation({
             branchId: transfer.toBranchId,
             variantId: original.variantId,
             quantity: item.receivedQuantity,
+            arrivedAt: now,
             updatedAt: now,
           });
         }
@@ -551,5 +574,57 @@ export const confirmTransferDelivery = mutation({
         },
       });
     }
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "transfer_confirmed",
+      transferId: args.transferId,
+    });
+  },
+});
+
+// ─── Branch-scoped: list in-transit transfers to this branch ──────────────
+
+export const listBranchInTransitTransfers = query({
+  args: {},
+  handler: async (ctx) => {
+    const { withBranchScope } = await import("../_helpers/withBranchScope");
+    const scope = await withBranchScope(ctx);
+    if (!scope.branchId) return [];
+
+    const transfers = await ctx.db
+      .query("transfers")
+      .withIndex("by_to_branch", (q) => q.eq("toBranchId", scope.branchId!))
+      .collect();
+
+    const inTransit = transfers.filter((t) => t.status === "inTransit");
+
+    const getBranchName = makeBranchNameResolver((id) => ctx.db.get(id));
+
+    const enriched = await Promise.all(
+      inTransit.map(async (transfer) => {
+        const fromBranchName = await getBranchName(transfer.fromBranchId);
+        const toBranchName = await getBranchName(transfer.toBranchId);
+        const items = await ctx.db
+          .query("transferItems")
+          .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+          .collect();
+        const boxes = await ctx.db
+          .query("transferBoxes")
+          .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+          .collect();
+        return {
+          _id: transfer._id,
+          fromBranchName,
+          toBranchName,
+          itemCount: items.length,
+          shippedAt: transfer.shippedAt ?? null,
+          createdAt: transfer.createdAt,
+          deliveryMode: boxes.length > 0 ? ("box" as const) : ("piece" as const),
+          boxCount: boxes.length,
+        };
+      })
+    );
+
+    return enriched.sort((a, b) => a.createdAt - b.createdAt);
   },
 });

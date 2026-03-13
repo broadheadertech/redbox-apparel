@@ -72,6 +72,9 @@ async function _buildReadingData(
   const productMap = new Map<string, ProductSale>();
 
   for (const txn of transactions) {
+    // Skip voided transactions — they did not result in actual sales
+    if (txn.status === "voided") continue;
+
     totalSalesCentavos += txn.totalCentavos;
     vatAmountCentavos += txn.vatAmountCentavos;
     discountAmountCentavos += txn.discountAmountCentavos;
@@ -145,8 +148,10 @@ async function _buildReadingData(
     .map((amount, hour) => ({ hour, amountCentavos: amount }))
     .filter((h) => h.amountCentavos > 0);
 
+  const completedCount = transactions.filter((t) => t.status !== "voided").length;
+
   return {
-    transactionCount: transactions.length,
+    transactionCount: completedCount,
     totalSalesCentavos,
     cashSalesCentavos,
     gcashSalesCentavos,
@@ -158,8 +163,8 @@ async function _buildReadingData(
     topProducts,
     hourlyBreakdown,
     averageTransactionCentavos:
-      transactions.length > 0
-        ? Math.round(totalSalesCentavos / transactions.length)
+      completedCount > 0
+        ? Math.round(totalSalesCentavos / completedCount)
         : 0,
     totalItemsSold: allProducts.reduce((s, p) => s + p.quantitySold, 0),
   };

@@ -415,6 +415,9 @@ export default function WarehouseReceivingPage() {
                   Items
                 </th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                  Mode
+                </th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                   Shipped At
                 </th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">
@@ -426,7 +429,7 @@ export default function WarehouseReceivingPage() {
               {inTransitTransfers === undefined &&
                 Array.from({ length: 4 }).map((_, i) => (
                   <tr key={i} className="border-b animate-pulse">
-                    {Array.from({ length: 5 }).map((_, j) => (
+                    {Array.from({ length: 6 }).map((_, j) => (
                       <td key={j} className="px-4 py-3">
                         <div className="h-4 rounded bg-muted w-full" />
                       </td>
@@ -437,7 +440,7 @@ export default function WarehouseReceivingPage() {
               {inTransitTransfers !== undefined && inTransitTransfers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-4 py-8 text-center text-muted-foreground"
                   >
                     No transfers in transit.
@@ -450,6 +453,13 @@ export default function WarehouseReceivingPage() {
                   <td className="px-4 py-3 font-medium">{transfer.fromBranchName}</td>
                   <td className="px-4 py-3">{transfer.toBranchName}</td>
                   <td className="px-4 py-3">{transfer.itemCount} item(s)</td>
+                  <td className="px-4 py-3 text-xs">
+                    {transfer.deliveryMode === "box" ? (
+                      <span className="text-blue-600">{transfer.boxCount} boxes</span>
+                    ) : (
+                      <span className="text-muted-foreground">By piece</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {transfer.shippedAt ? relativeTime(transfer.shippedAt) : "—"}
                   </td>

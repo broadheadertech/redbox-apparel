@@ -5,7 +5,7 @@
 
 export type PromoInput = {
   name: string;
-  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered";
+  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
   percentageValue?: number;
   maxDiscountCentavos?: number;
   fixedAmountCentavos?: number;
@@ -13,7 +13,7 @@ export type PromoInput = {
   getQuantity?: number;
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
-  // Product scope (empty arrays = all products)
+  // Product scope (empty arrays = all products) — for crossSell/pwp this is the TRIGGER scope
   brandIds: string[];
   categoryIds: string[];
   variantIds: string[];
@@ -24,6 +24,16 @@ export type PromoInput = {
   sizes?: string[];
   // Aging tier scope (empty = all stock)
   agingTiers?: string[];
+  // crossSell reward scope
+  crossSellRewardType?: "percentage" | "fixedAmount";
+  rewardBrandIds?: string[];
+  rewardCategoryIds?: string[];
+  rewardStyleIds?: string[];
+  rewardVariantIds?: string[];
+  // pwp (Purchase with Purchase)
+  pwpTriggerMinQuantity?: number;
+  pwpRewardVariantIds?: string[];
+  pwpRewardPriceCentavos?: number;
 };
 
 export type CartItemForPromo = {
@@ -130,6 +140,10 @@ export function calculatePromoDiscount(
       return calcBuyXGetY(eligible, promo);
     case "tiered":
       return calcTiered(eligibleTotal, promo);
+    case "crossSell":
+      return calcCrossSell(items, promo);
+    case "pwp":
+      return calcPWP(items, promo);
     default:
       return { applicable: false, discountCentavos: 0, description: "" };
   }
@@ -245,4 +259,118 @@ function calcTiered(
     discountCentavos: discount,
     description: `${promo.name} (₱${(discountOff / 100).toFixed(0)} off on ₱${(minSpend / 100).toFixed(0)}+)`,
   };
+}
+
+function calcPWP(
+  allItems: CartItemForPromo[],
+  promo: PromoInput
+): PromoResult {
+  const minQty = promo.pwpTriggerMinQuantity ?? 1;
+  const rewardVids = promo.pwpRewardVariantIds ?? [];
+  const rewardPrice = promo.pwpRewardPriceCentavos ?? 0;
+
+  if (rewardVids.length === 0 || rewardPrice < 0) {
+    return { applicable: false, discountCentavos: 0, description: "" };
+  }
+
+  // Step 1: Check trigger — total quantity of eligible trigger items >= minQty
+  const triggerItems = filterEligibleItems(allItems, promo);
+  const triggerQty = triggerItems.reduce((sum, i) => sum + i.quantity, 0);
+
+  if (triggerQty < minQty) {
+    return { applicable: false, discountCentavos: 0, description: "" };
+  }
+
+  // Step 2: Find reward items in cart (must be in pwpRewardVariantIds, not the trigger scope)
+  const rewardVidSet = new Set(rewardVids);
+  const rewardItems = allItems.filter((i) => rewardVidSet.has(i.variantId));
+
+  if (rewardItems.length === 0) {
+    return { applicable: false, discountCentavos: 0, description: "" };
+  }
+
+  // Step 3: Discount = (currentPrice - rewardPrice) per reward unit, floored at 0
+  let discount = 0;
+  for (const item of rewardItems) {
+    const savingPerUnit = Math.max(0, item.unitPriceCentavos - rewardPrice);
+    discount += savingPerUnit * item.quantity;
+  }
+
+  if (discount === 0) {
+    return { applicable: false, discountCentavos: 0, description: "" };
+  }
+
+  return {
+    applicable: true,
+    discountCentavos: discount,
+    description: `${promo.name} (Buy ${minQty}+ get reward at ₱${(rewardPrice / 100).toFixed(0)})`,
+  };
+}
+
+function calcCrossSell(
+  allItems: CartItemForPromo[],
+  promo: PromoInput
+): PromoResult {
+  // Step 1: Check trigger — at least one eligible trigger item must be in cart
+  const triggerItems = filterEligibleItems(allItems, promo);
+  if (triggerItems.length === 0) {
+    return { applicable: false, discountCentavos: 0, description: "" };
+  }
+
+  // Step 2: Find reward items — items matching the reward scope
+  const rewardPromoScope: PromoInput = {
+    ...promo,
+    brandIds: promo.rewardBrandIds ?? [],
+    categoryIds: promo.rewardCategoryIds ?? [],
+    variantIds: promo.rewardVariantIds ?? [],
+    styleIds: promo.rewardStyleIds,
+    genders: undefined,
+    colors: undefined,
+    sizes: undefined,
+    agingTiers: undefined,
+  };
+
+  const rewardItems = filterEligibleItems(allItems, rewardPromoScope);
+
+  // Exclude trigger items from rewards to avoid double-counting
+  const triggerSet = new Set(triggerItems.map((i) => i.variantId));
+  const pureRewardItems = rewardItems.filter((i) => !triggerSet.has(i.variantId));
+
+  if (pureRewardItems.length === 0) {
+    return { applicable: false, discountCentavos: 0, description: "" };
+  }
+
+  const rewardTotal = pureRewardItems.reduce(
+    (sum, item) => sum + item.unitPriceCentavos * item.quantity,
+    0
+  );
+
+  const rewardType = promo.crossSellRewardType ?? "percentage";
+
+  if (rewardType === "percentage") {
+    const pct = promo.percentageValue ?? 0;
+    if (pct <= 0 || pct > 100) {
+      return { applicable: false, discountCentavos: 0, description: "" };
+    }
+    let discount = Math.round(rewardTotal * (pct / 100));
+    if (promo.maxDiscountCentavos && discount > promo.maxDiscountCentavos) {
+      discount = promo.maxDiscountCentavos;
+    }
+    return {
+      applicable: true,
+      discountCentavos: discount,
+      description: `${promo.name} (${pct}% off reward items)`,
+    };
+  } else {
+    const fixedOff = promo.fixedAmountCentavos ?? 0;
+    if (fixedOff <= 0) {
+      return { applicable: false, discountCentavos: 0, description: "" };
+    }
+    const discount = Math.min(fixedOff, rewardTotal);
+    return {
+      applicable: true,
+      discountCentavos: discount,
+      description: `${promo.name} (₱${(fixedOff / 100).toFixed(0)} off reward items)`,
+    };
+  }
 }

@@ -18,9 +18,14 @@ import {
   PackageCheck,
   ShieldAlert,
   Ghost,
+  Box,
+  BarChart3,
+  Clock,
+  Timer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
+import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 
@@ -37,12 +42,16 @@ const operationsNavItems: NavItem[] = [
   { href: "/warehouse/transfer-requests", label: "Transfer Requests", icon: ClipboardCheck },
   { href: "/warehouse/demand", label: "Demand", icon: TrendingUp },
   { href: "/warehouse/logistics", label: "Logistics", icon: Truck },
+  { href: "/warehouse/driver-analytics", label: "Driver Analytics", icon: BarChart3 },
   { href: "/warehouse/restock-ai", label: "Restock AI", icon: Bot },
   { href: "/warehouse/auto-replenish", label: "Auto-Replenish", icon: RefreshCw },
   { href: "/warehouse/surge-alerts", label: "Surge Alerts", icon: TrendingUp },
+  { href: "/warehouse/inventory-aging", label: "Inventory Aging", icon: Clock },
+  { href: "/warehouse/fulfillment-speed", label: "Fulfillment Speed", icon: Timer },
 ];
 
 const floorNavItems: NavItem[] = [
+  { href: "/warehouse/packing", label: "Box Packing", icon: Box },
   { href: "/warehouse/transfers", label: "Transfers", icon: ArrowRightLeft },
   { href: "/warehouse/receiving", label: "Receiving", icon: PackageCheck },
   { href: "/warehouse/quarantine", label: "Quarantine", icon: ShieldAlert },
@@ -142,9 +151,10 @@ export default function WarehouseLayout({
             ) : (
               <h2 className="text-lg font-semibold">Warehouse</h2>
             )}
-            <p className="text-sm text-muted-foreground">
-              {currentUser.name}
-            </p>
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-sm text-muted-foreground">{currentUser.name}</p>
+              <StaffNotificationBell />
+            </div>
           </div>
           <Separator />
           <nav className="p-2 space-y-1">

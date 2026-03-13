@@ -16,7 +16,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  BarChart3, Zap, TrendingDown, Minus, Skull,
+  BarChart3, Zap, TrendingDown, Minus, Skull, Clock,
 } from "lucide-react";
 
 const PERIOD_OPTIONS = [
@@ -32,6 +32,12 @@ const CLASS_COLORS: Record<string, string> = {
   mid: "bg-amber-500/10 text-amber-600 border-amber-500/30",
   slow: "bg-red-500/10 text-red-600 border-red-500/30",
   dead: "bg-gray-500/10 text-gray-500 border-gray-500/30",
+};
+
+const AGING_COLORS: Record<string, string> = {
+  green: "text-green-600",
+  yellow: "text-amber-600",
+  red: "text-red-600",
 };
 
 const CLASS_ICONS: Record<string, React.ReactNode> = {
@@ -155,6 +161,7 @@ export default function BranchSellThroughPage() {
                 <TableHead className="text-right">SOLD</TableHead>
                 <TableHead className="text-right">Sell-Thru %</TableHead>
                 <TableHead>Class</TableHead>
+                <TableHead className="text-right">Avg Age</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -184,6 +191,14 @@ export default function BranchSellThroughPage() {
                       {CLASS_ICONS[item.classification]}
                       <span className="ml-1 uppercase">{item.classification}</span>
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <span className={cn(
+                      "tabular-nums text-sm",
+                      AGING_COLORS[item.agingTier]
+                    )}>
+                      {item.avgAgeDays}d
+                    </span>
                   </TableCell>
                 </TableRow>
               ))}

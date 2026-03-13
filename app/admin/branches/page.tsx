@@ -39,7 +39,9 @@ import {
   Search,
   UserCheck,
   XCircle,
+  Settings,
 } from "lucide-react";
+import Link from "next/link";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
 
@@ -388,11 +390,16 @@ export default function BranchesPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <Link href={`/admin/branches/${branch._id}`}>
+                        <Button variant="ghost" size="sm" title="Manage branch">
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                      </Link>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => openEditDialog(branch)}
-                        title="Edit branch"
+                        title="Quick edit"
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>

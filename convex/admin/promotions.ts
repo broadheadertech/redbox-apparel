@@ -27,7 +27,9 @@ const promoTypeValidator = v.union(
   v.literal("percentage"),
   v.literal("fixedAmount"),
   v.literal("buyXGetY"),
-  v.literal("tiered")
+  v.literal("tiered"),
+  v.literal("crossSell"),
+  v.literal("pwp")
 );
 
 const commonArgs = {
@@ -59,6 +61,14 @@ const commonArgs = {
   isActive: v.boolean(),
   priority: v.number(),
   agingTiers: v.optional(v.array(v.union(v.literal("green"), v.literal("yellow"), v.literal("red")))),
+  crossSellRewardType: v.optional(v.union(v.literal("percentage"), v.literal("fixedAmount"))),
+  rewardBrandIds: v.optional(v.array(v.id("brands"))),
+  rewardCategoryIds: v.optional(v.array(v.id("categories"))),
+  rewardStyleIds: v.optional(v.array(v.id("styles"))),
+  rewardVariantIds: v.optional(v.array(v.id("variants"))),
+  pwpTriggerMinQuantity: v.optional(v.number()),
+  pwpRewardVariantIds: v.optional(v.array(v.id("variants"))),
+  pwpRewardPriceCentavos: v.optional(v.number()),
 };
 
 function validatePromoFields(args: {
@@ -70,6 +80,10 @@ function validatePromoFields(args: {
   getQuantity?: number;
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
+  crossSellRewardType?: "percentage" | "fixedAmount";
+  pwpTriggerMinQuantity?: number;
+  pwpRewardVariantIds?: string[];
+  pwpRewardPriceCentavos?: number;
   startDate: number;
   endDate?: number;
 }) {
@@ -109,6 +123,34 @@ function validatePromoFields(args: {
       }
       if (!args.tieredDiscountCentavos || args.tieredDiscountCentavos <= 0) {
         throw new ConvexError("Tiered discount amount must be positive");
+      }
+      break;
+    }
+    case "crossSell": {
+      if (!args.crossSellRewardType) {
+        throw new ConvexError("Cross-sell reward type (percentage or fixed) is required");
+      }
+      if (args.crossSellRewardType === "percentage") {
+        const pct = args.percentageValue;
+        if (pct === undefined || pct <= 0 || pct > 100) {
+          throw new ConvexError("Reward percentage must be between 1 and 100");
+        }
+      } else {
+        if (!args.fixedAmountCentavos || args.fixedAmountCentavos <= 0) {
+          throw new ConvexError("Reward fixed amount must be positive");
+        }
+      }
+      break;
+    }
+    case "pwp": {
+      if (!args.pwpTriggerMinQuantity || args.pwpTriggerMinQuantity < 1) {
+        throw new ConvexError("Trigger minimum quantity must be at least 1");
+      }
+      if (!args.pwpRewardVariantIds || args.pwpRewardVariantIds.length === 0) {
+        throw new ConvexError("At least one reward product must be selected");
+      }
+      if (args.pwpRewardPriceCentavos === undefined || args.pwpRewardPriceCentavos < 0) {
+        throw new ConvexError("Reward special price must be 0 or more");
       }
       break;
     }
@@ -222,5 +264,22 @@ export const listStylesForPromo = query({
     await requireRole(ctx, ADMIN_ROLES);
     const styles = await ctx.db.query("styles").collect();
     return styles.filter((s) => s.isActive);
+  },
+});
+
+export const listVariantsForStyles = query({
+  args: { styleIds: v.array(v.id("styles")) },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ADMIN_ROLES);
+    if (args.styleIds.length === 0) return [];
+    const batches = await Promise.all(
+      args.styleIds.map((sid) =>
+        ctx.db
+          .query("variants")
+          .withIndex("by_style", (q) => q.eq("styleId", sid))
+          .collect()
+      )
+    );
+    return batches.flat().filter((v) => v.isActive !== false);
   },
 });

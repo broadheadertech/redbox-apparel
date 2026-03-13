@@ -40,4 +40,12 @@ crons.daily(
   internal.ai.branchScoring.generateBranchScores
 );
 
+// Daily trading calendar reminders — 8 AM PHT = 00:00 UTC
+// Sends email alerts to admin/manager/hqStaff for events 7, 3, and 1 day ahead
+crons.daily(
+  "trading-calendar-reminders",
+  { hourUTC: 0, minuteUTC: 0 },
+  internal.analytics.tradingCalendarReminderJob.sendTradingReminders
+);
+
 export default crons;

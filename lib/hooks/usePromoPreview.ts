@@ -15,7 +15,7 @@ type ActivePromo = {
   _id: Id<"promotions">;
   name: string;
   description?: string;
-  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered";
+  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
   percentageValue?: number;
   maxDiscountCentavos?: number;
   fixedAmountCentavos?: number;
@@ -32,6 +32,16 @@ type ActivePromo = {
   sizes: string[];
   priority: number;
   agingTiers: string[];
+  // crossSell
+  crossSellRewardType?: "percentage" | "fixedAmount";
+  rewardBrandIds?: string[];
+  rewardCategoryIds?: string[];
+  rewardStyleIds?: string[];
+  rewardVariantIds?: string[];
+  // pwp
+  pwpTriggerMinQuantity?: number;
+  pwpRewardVariantIds?: string[];
+  pwpRewardPriceCentavos?: number;
 };
 
 export function usePromoPreview(

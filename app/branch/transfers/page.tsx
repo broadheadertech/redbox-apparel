@@ -55,10 +55,12 @@ function TransferTypeBadge({ type }: { type: string }) {
         "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
         type === "return"
           ? "bg-orange-100 text-orange-800"
-          : "bg-cyan-100 text-cyan-800"
+          : type === "interBranch"
+            ? "bg-violet-100 text-violet-800"
+            : "bg-cyan-100 text-cyan-800"
       )}
     >
-      {type === "return" ? "Return" : "Request"}
+      {type === "return" ? "Return" : type === "interBranch" ? "Inter-Branch" : "Request"}
     </span>
   );
 }
@@ -100,6 +102,8 @@ export default function BranchTransfersPage() {
   const branches = useQuery(api.transfers.requests.listActiveBranches);
   const createTransfer = useMutation(api.transfers.requests.createTransferRequest);
   const cancelTransfer = useMutation(api.transfers.requests.cancelTransfer);
+  const acknowledgeInterBranch = useMutation(api.transfers.requests.acknowledgeInterBranch);
+  const declineInterBranch = useMutation(api.transfers.requests.declineInterBranch);
 
   const pagination = usePagination(transfers ?? undefined);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
@@ -111,10 +115,15 @@ export default function BranchTransfersPage() {
   const userBranchName = userBranch?.name ?? "Your branch";
   const isWarehouseUser = userBranch?.type === "warehouse";
 
-  // Retail branches for warehouse "Send to Branch" dropdown
+  // Other branches for "Send to Branch" dropdown (warehouse or inter-branch)
   const retailBranches = branches?.filter(
     (b) => b.type !== "warehouse" && b.isActive && b._id !== userBranchId
   );
+
+  // State for acknowledge/decline
+  const [declineId, setDeclineId] = useState<string | null>(null);
+  const [declineReason, setDeclineReason] = useState("");
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   // ── Form state ────────────────────────────────────────────────────────────
   const [showForm, setShowForm] = useState(false);
@@ -130,9 +139,7 @@ export default function BranchTransfersPage() {
   const searchBranchId =
     formTab === "request"
       ? warehouseBranch?._id          // retail requesting from warehouse
-      : formTab === "return"
-        ? userBranchId                  // retail returning own stock
-        : userBranchId;                 // warehouse sending own stock
+      : userBranchId;                  // return, send — always own branch stock
 
   const searchResults = useQuery(
     api.inventory.stockLevels.searchBranchInventory,
@@ -190,17 +197,17 @@ export default function BranchTransfersPage() {
 
     let fromBranchId: Id<"branches">;
     let toBranchId: Id<"branches">;
-    let transferType: "stockRequest" | "return";
+    let transferType: "stockRequest" | "return" | "interBranch";
 
     if (formTab === "send") {
-      // Warehouse sending to a retail branch
+      // Branch sending to another branch (warehouse→retail or retail→retail)
       if (!destinationBranchId) {
         setFormError("Select a destination branch.");
         return;
       }
       fromBranchId = userBranchId;
       toBranchId = destinationBranchId as Id<"branches">;
-      transferType = "stockRequest";
+      transferType = isWarehouseUser ? "stockRequest" : "interBranch";
     } else if (formTab === "request") {
       // Retail requesting from warehouse
       if (!warehouseBranch) {
@@ -318,6 +325,16 @@ export default function BranchTransfersPage() {
                 >
                   Return to Warehouse
                 </button>
+                <button
+                  onClick={() => switchTab("send")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                    formTab === "send"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Send to Branch
+                </button>
               </>
             )}
           </div>
@@ -382,10 +399,10 @@ export default function BranchTransfersPage() {
           {/* Product search */}
           <div className="space-y-2">
             <label className="text-sm font-medium">
-              {formTab === "send"
-                ? "Search Warehouse Inventory"
-                : formTab === "request"
-                  ? "Search Warehouse Products"
+              {formTab === "request"
+                ? "Search Warehouse Products"
+                : formTab === "send"
+                  ? "Search Your Branch Inventory"
                   : "Search Your Branch Inventory"}
             </label>
             {!searchBranchId ? (
@@ -567,42 +584,111 @@ export default function BranchTransfersPage() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {transfer.status === "requested" && (
-                      cancellingId === transfer._id ? (
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="h-7 text-xs"
-                            onClick={() => {
-                              cancelTransfer({ transferId: transfer._id as Id<"transfers"> }).then(
-                                () => setCancellingId(null),
-                                () => setCancellingId(null)
-                              );
-                            }}
-                          >
-                            Confirm
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs"
-                            onClick={() => setCancellingId(null)}
-                          >
-                            No
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                          onClick={() => setCancellingId(transfer._id)}
-                        >
-                          Cancel
-                        </Button>
-                      )
-                    )}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {/* Inter-branch: receiving branch can acknowledge or decline */}
+                      {transfer.status === "requested" &&
+                        transfer.type === "interBranch" &&
+                        userBranchId &&
+                        transfer.toBranchId === userBranchId && (
+                          declineId === transfer._id ? (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                placeholder="Reason..."
+                                className="h-7 text-xs w-32"
+                                value={declineReason}
+                                onChange={(e) => setDeclineReason(e.target.value)}
+                              />
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="h-7 text-xs"
+                                disabled={!declineReason.trim()}
+                                onClick={() => {
+                                  setProcessingId(transfer._id);
+                                  declineInterBranch({
+                                    transferId: transfer._id as Id<"transfers">,
+                                    reason: declineReason.trim(),
+                                  }).then(
+                                    () => { setDeclineId(null); setDeclineReason(""); setProcessingId(null); },
+                                    () => setProcessingId(null)
+                                  );
+                                }}
+                              >
+                                {processingId === transfer._id ? "..." : "Decline"}
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setDeclineId(null)}>
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                className="h-7 text-xs"
+                                disabled={processingId === transfer._id}
+                                onClick={() => {
+                                  setProcessingId(transfer._id);
+                                  acknowledgeInterBranch({
+                                    transferId: transfer._id as Id<"transfers">,
+                                  }).then(
+                                    () => setProcessingId(null),
+                                    () => setProcessingId(null)
+                                  );
+                                }}
+                              >
+                                {processingId === transfer._id ? "..." : "Acknowledge"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs text-destructive border-destructive/30"
+                                onClick={() => setDeclineId(transfer._id)}
+                              >
+                                Decline
+                              </Button>
+                            </>
+                          )
+                      )}
+
+                      {/* Cancel own pending transfers (requestor) */}
+                      {transfer.status === "requested" &&
+                        transfer.requestedById === currentUser?._id && (
+                          cancellingId === transfer._id ? (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="h-7 text-xs"
+                                onClick={() => {
+                                  cancelTransfer({ transferId: transfer._id as Id<"transfers"> }).then(
+                                    () => setCancellingId(null),
+                                    () => setCancellingId(null)
+                                  );
+                                }}
+                              >
+                                Confirm
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs"
+                                onClick={() => setCancellingId(null)}
+                              >
+                                No
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                              onClick={() => setCancellingId(transfer._id)}
+                            >
+                              Cancel
+                            </Button>
+                          )
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

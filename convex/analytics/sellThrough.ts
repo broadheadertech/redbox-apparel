@@ -118,6 +118,9 @@ async function computeSellThrough(
     sold: number;
     sellThruPct: number;
     classification: Classification;
+    avgAgeDays: number;
+    oldestAgeDays: number;
+    agingTier: "green" | "yellow" | "red";
     branchBreakdown: {
       branchId: string;
       beg: number;
@@ -180,8 +183,78 @@ async function computeSellThrough(
         sold: totalSold,
         sellThruPct,
         classification,
+        avgAgeDays: 0,
+        oldestAgeDays: 0,
+        agingTier: "green",
         branchBreakdown,
       });
+    }
+  }
+
+  // ── Aging: fetch inventoryBatches for target branches and compute per-style weighted avg age ──
+  const allBatchArrays = await Promise.all(
+    targetBranches.map((branch: Doc<"branches">) =>
+      ctx.db
+        .query("inventoryBatches")
+        .withIndex("by_branch_variant", (q: any) => q.eq("branchId", branch._id))
+        .collect()
+    )
+  );
+
+  const now2 = Date.now();
+  // variantId → { totalQty, weightedAgeDaysSum, oldestAgeDays, greenQty, yellowQty, redQty }
+  const variantAgingMap = new Map<string, {
+    totalQty: number; weightedSum: number; oldestDays: number;
+    greenQty: number; yellowQty: number; redQty: number;
+  }>();
+
+  for (const batches of allBatchArrays) {
+    for (const batch of batches) {
+      if (batch.quantity <= 0) continue;
+      const vid = String(batch.variantId);
+      const ageDays = Math.floor((now2 - batch.receivedAt) / 86_400_000);
+      let entry = variantAgingMap.get(vid);
+      if (!entry) {
+        entry = { totalQty: 0, weightedSum: 0, oldestDays: 0, greenQty: 0, yellowQty: 0, redQty: 0 };
+        variantAgingMap.set(vid, entry);
+      }
+      entry.totalQty += batch.quantity;
+      entry.weightedSum += ageDays * batch.quantity;
+      if (ageDays > entry.oldestDays) entry.oldestDays = ageDays;
+      if (ageDays <= 90) entry.greenQty += batch.quantity;
+      else if (ageDays <= 180) entry.yellowQty += batch.quantity;
+      else entry.redQty += batch.quantity;
+    }
+  }
+
+  // Roll up to style level
+  const styleAgingMap = new Map<string, {
+    totalQty: number; weightedSum: number; oldestDays: number;
+    greenQty: number; yellowQty: number; redQty: number;
+  }>();
+
+  for (const [styleId, variantIds] of styleVariants) {
+    let agg = { totalQty: 0, weightedSum: 0, oldestDays: 0, greenQty: 0, yellowQty: 0, redQty: 0 };
+    for (const vid of variantIds) {
+      const va = variantAgingMap.get(vid);
+      if (!va) continue;
+      agg.totalQty += va.totalQty;
+      agg.weightedSum += va.weightedSum;
+      if (va.oldestDays > agg.oldestDays) agg.oldestDays = va.oldestDays;
+      agg.greenQty += va.greenQty;
+      agg.yellowQty += va.yellowQty;
+      agg.redQty += va.redQty;
+    }
+    if (agg.totalQty > 0) styleAgingMap.set(styleId, agg);
+  }
+
+  // Attach aging to style entries
+  for (const entry of styleEntries) {
+    const aging = styleAgingMap.get(entry.styleId);
+    if (aging) {
+      entry.avgAgeDays = Math.round(aging.weightedSum / aging.totalQty);
+      entry.oldestAgeDays = aging.oldestDays;
+      entry.agingTier = aging.redQty > 0 ? "red" : aging.yellowQty > 0 ? "yellow" : "green";
     }
   }
 
@@ -304,6 +377,9 @@ export const getSellThroughAnalysis = query({
         sold: entry.sold,
         sellThruPct: entry.sellThruPct,
         classification: entry.classification,
+        avgAgeDays: entry.avgAgeDays,
+        oldestAgeDays: entry.oldestAgeDays,
+        agingTier: entry.agingTier,
         notesCount: notesCounts.get(entry.styleId) ?? 0,
         branchBreakdown: entry.branchBreakdown.map((bb) => ({
           ...bb,
@@ -371,6 +447,9 @@ export const getBranchSellThrough = query({
         sold: entry.sold,
         sellThruPct: entry.sellThruPct,
         classification: entry.classification,
+        avgAgeDays: entry.avgAgeDays,
+        oldestAgeDays: entry.oldestAgeDays,
+        agingTier: entry.agingTier,
       };
     });
 

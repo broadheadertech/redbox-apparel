@@ -1,9 +1,9 @@
 import { v, ConvexError } from "convex/values";
-import { mutation } from "../_generated/server";
+import { mutation, query } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
-import { POS_ROLES } from "../_helpers/permissions";
+import { POS_ROLES, requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { calculateTaxBreakdown } from "../_helpers/taxCalculations";
 import {
@@ -57,6 +57,7 @@ export const createTransaction = mutation({
       method: v.union(v.literal("cash"), v.literal("gcash"), v.literal("maya")),
       amountCentavos: v.number(),
     })),
+    fashionAssistantId: v.optional(v.id("fashionAssistants")),
   },
   handler: async (ctx, args) => {
     // 1. Auth gate
@@ -346,6 +347,7 @@ export const createTransaction = mutation({
       promoDiscountAmountCentavos:
         promoDiscountCentavos > 0 ? promoDiscountCentavos : undefined,
       splitPayment: args.splitPayment,
+      fashionAssistantId: args.fashionAssistantId,
       amountTenderedCentavos:
         args.paymentMethod === "cash"
           ? args.amountTenderedCentavos
@@ -423,5 +425,193 @@ export const createTransaction = mutation({
       changeCentavos: changeCentavos ?? 0,
       promoDiscountCentavos,
     };
+  },
+});
+
+// ─── getTodayTransactions ────────────────────────────────────────────────────
+// Returns today's transactions for the branch (manager/admin only).
+// Used by the void management page.
+
+const VOID_MANAGER_ROLES = ["admin", "manager"] as const;
+const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+export const getTodayTransactions = query({
+  args: {
+    cursor: v.optional(v.number()), // createdAt of last seen item (timestamp cursor)
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, VOID_MANAGER_ROLES);
+    const scope = await withBranchScope(ctx);
+    const branchId = scope.branchId;
+    if (!branchId) return { transactions: [], hasMore: false };
+
+    const pageSize = Math.min(args.limit ?? 50, 100);
+
+    // Today in PHT
+    const now = Date.now();
+    const phtDate = new Date(now + PHT_OFFSET_MS);
+    const startOfDayMs =
+      Date.UTC(phtDate.getUTCFullYear(), phtDate.getUTCMonth(), phtDate.getUTCDate()) -
+      PHT_OFFSET_MS;
+    const endOfDayMs = startOfDayMs + 86_400_000;
+
+    // Cursor: if provided, use as upper bound (fetch older records)
+    const upperBound = args.cursor ?? endOfDayMs;
+
+    const rows = await ctx.db
+      .query("transactions")
+      .withIndex("by_branch_date", (q) =>
+        q
+          .eq("branchId", branchId)
+          .gte("createdAt", startOfDayMs)
+          .lt("createdAt", upperBound)
+      )
+      .order("desc")
+      .take(pageSize + 1);
+
+    const hasMore = rows.length > pageSize;
+    const page = rows.slice(0, pageSize);
+
+    // Filter out negative-total return transactions
+    const sales = page.filter((t) => t.totalCentavos >= 0);
+
+    // Resolve cashier names
+    const userCache = new Map<string, string>();
+    const enriched = await Promise.all(
+      sales.map(async (txn) => {
+        const uid = txn.cashierId as string;
+        if (!userCache.has(uid)) {
+          const u = await ctx.db.get(txn.cashierId);
+          userCache.set(uid, u?.name ?? "Unknown");
+        }
+        return {
+          _id: txn._id,
+          receiptNumber: txn.receiptNumber,
+          totalCentavos: txn.totalCentavos,
+          paymentMethod: txn.paymentMethod,
+          cashierName: userCache.get(uid) ?? "Unknown",
+          status: txn.status ?? "completed",
+          voidedAt: txn.voidedAt,
+          voidReason: txn.voidReason,
+          createdAt: txn.createdAt,
+        };
+      })
+    );
+
+    return {
+      transactions: enriched,
+      hasMore,
+      nextCursor: hasMore ? page[page.length - 1].createdAt : undefined,
+    };
+  },
+});
+
+// ─── voidTransaction ─────────────────────────────────────────────────────────
+// Voids a same-day transaction. Manager/admin only.
+// Restocks inventory, marks transaction as voided, logs audit entry.
+
+export const voidTransaction = mutation({
+  args: {
+    transactionId: v.id("transactions"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, VOID_MANAGER_ROLES);
+    const scope = await withBranchScope(ctx);
+    const branchId = scope.branchId!;
+
+    // 1. Load transaction
+    const txn = await ctx.db.get(args.transactionId);
+    if (!txn) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transaction not found." });
+    }
+
+    // 2. Branch scope
+    if (txn.branchId !== branchId) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    // 3. Already voided?
+    if (txn.status === "voided") {
+      throw new ConvexError({ code: "ALREADY_VOIDED", message: "Transaction is already voided." });
+    }
+
+    // 4. Return transactions cannot be voided
+    if (txn.totalCentavos < 0) {
+      throw new ConvexError({ code: "INVALID", message: "Return transactions cannot be voided." });
+    }
+
+    // 5. Same-day check (PHT)
+    const nowMs = Date.now();
+    const phtDate = new Date(nowMs + PHT_OFFSET_MS);
+    const startOfDayMs =
+      Date.UTC(phtDate.getUTCFullYear(), phtDate.getUTCMonth(), phtDate.getUTCDate()) -
+      PHT_OFFSET_MS;
+    if (txn.createdAt < startOfDayMs) {
+      throw new ConvexError({
+        code: "TOO_OLD",
+        message: "Only today's transactions can be voided. Use Returns for older transactions.",
+      });
+    }
+
+    // 6. Block if returns already processed against this transaction
+    const existingReturn = await ctx.db
+      .query("transactions")
+      .withIndex("by_receiptNumber", (q) =>
+        q.eq("receiptNumber", `RET-${txn.receiptNumber}`)
+      )
+      .first();
+    if (existingReturn) {
+      throw new ConvexError({
+        code: "HAS_RETURNS",
+        message: "This transaction has existing returns and cannot be voided.",
+      });
+    }
+
+    // 7. Restock inventory for each item
+    const items = await ctx.db
+      .query("transactionItems")
+      .withIndex("by_transaction", (q) => q.eq("transactionId", txn._id))
+      .collect();
+
+    for (const item of items) {
+      const inv = await ctx.db
+        .query("inventory")
+        .withIndex("by_branch_variant", (q) =>
+          q.eq("branchId", branchId).eq("variantId", item.variantId)
+        )
+        .unique();
+
+      if (inv) {
+        await ctx.db.patch(inv._id, {
+          quantity: inv.quantity + item.quantity,
+          updatedAt: nowMs,
+        });
+      }
+    }
+
+    // 8. Mark transaction voided
+    await ctx.db.patch(args.transactionId, {
+      status: "voided",
+      voidedAt: nowMs,
+      voidedById: user._id,
+      voidReason: args.reason.trim(),
+    });
+
+    // 9. Audit log
+    await _logAuditEntry(ctx, {
+      action: "transaction.void",
+      userId: user._id,
+      branchId,
+      entityType: "transactions",
+      entityId: args.transactionId,
+      after: {
+        receiptNumber: txn.receiptNumber,
+        totalCentavos: txn.totalCentavos,
+        reason: args.reason.trim(),
+        voidedBy: user.name,
+      },
+    });
   },
 });

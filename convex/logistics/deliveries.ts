@@ -5,6 +5,7 @@ import { requireRole, DRIVER_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { clearReservedOnDelivery } from "../_helpers/transferStock";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
+import { internal } from "../_generated/api";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,30 @@ export const getDeliveryDetail = query({
       })
     );
 
+    // Fetch boxes for this transfer (if any)
+    const boxes = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+      .collect();
+
+    let boxBreakdown: {
+      boxNumber: number;
+      boxCode: string;
+      status: string;
+      totalItems: number;
+    }[] = [];
+
+    if (boxes.length > 0) {
+      boxBreakdown = boxes
+        .sort((a, b) => a.boxNumber - b.boxNumber)
+        .map((box) => ({
+          boxNumber: box.boxNumber,
+          boxCode: box.boxCode,
+          status: box.status,
+          totalItems: box.totalItems,
+        }));
+    }
+
     return {
       transferId: transfer._id,
       fromBranchName: fromBranch?.isActive ? fromBranch.name : "(inactive)",
@@ -85,6 +110,8 @@ export const getDeliveryDetail = query({
       toBranchLongitude: toBranch?.longitude ?? null,
       itemCount: items.length,
       items: enrichedItems,
+      boxes: boxBreakdown,
+      deliveryMode: boxes.length > 0 ? ("box" as const) : ("piece" as const),
       driverArrivedAt: transfer.driverArrivedAt ?? null,
       createdAt: transfer.createdAt,
     };
@@ -124,6 +151,11 @@ export const markArrived = mutation({
       entityType: "transfers",
       entityId: args.transferId,
       after: { driverArrivedAt: now },
+    });
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "driver_arrived",
+      transferId: args.transferId,
     });
   },
 });
@@ -168,6 +200,7 @@ export const driverConfirmDelivery = mutation({
         if (existing) {
           await ctx.db.patch(existing._id, {
             quantity: existing.quantity + qty,
+            arrivedAt: now,
             updatedAt: now,
           });
         } else {
@@ -175,6 +208,7 @@ export const driverConfirmDelivery = mutation({
             branchId: transfer.toBranchId,
             variantId: item.variantId,
             quantity: qty,
+            arrivedAt: now,
             updatedAt: now,
           });
         }
@@ -237,5 +271,10 @@ export const driverConfirmDelivery = mutation({
         after: { transferId: args.transferId },
       });
     }
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "driver_delivered",
+      transferId: args.transferId,
+    });
   },
 });

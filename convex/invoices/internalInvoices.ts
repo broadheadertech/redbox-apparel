@@ -45,19 +45,26 @@ export const listInternalInvoices = query({
       return name;
     }
 
+    // Count items per invoice for summary
     const enriched = await Promise.all(
-      invoices.map(async (inv) => ({
-        _id: inv._id,
-        invoiceNumber: inv.invoiceNumber,
-        transferId: inv.transferId,
-        fromBranchName: await getBranchName(inv.fromBranchId),
-        toBranchName: await getBranchName(inv.toBranchId),
-        subtotalCentavos: inv.subtotalCentavos,
-        vatAmountCentavos: inv.vatAmountCentavos,
-        totalCentavos: inv.totalCentavos,
-        status: inv.status,
-        createdAt: inv.createdAt,
-      }))
+      invoices.map(async (inv) => {
+        const items = await ctx.db
+          .query("internalInvoiceItems")
+          .withIndex("by_invoice", (q) => q.eq("invoiceId", inv._id))
+          .collect();
+        const totalQty = items.reduce((sum, it) => sum + it.quantity, 0);
+
+        return {
+          _id: inv._id,
+          invoiceNumber: inv.invoiceNumber,
+          transferId: inv.transferId,
+          fromBranchName: await getBranchName(inv.fromBranchId),
+          toBranchName: await getBranchName(inv.toBranchId),
+          totalItems: totalQty,
+          status: inv.status,
+          createdAt: inv.createdAt,
+        };
+      })
     );
 
     const nextCursor = invoices.length > 0 ? invoices[invoices.length - 1].createdAt : undefined;
@@ -65,7 +72,7 @@ export const listInternalInvoices = query({
   },
 });
 
-// ── Get invoice detail ──────────────────────────────────────────────────────
+// ── Get invoice detail (with box breakdown) ─────────────────────────────────
 
 export const getInternalInvoiceDetail = query({
   args: { invoiceId: v.id("internalInvoices") },
@@ -92,16 +99,62 @@ export const getInternalInvoiceDetail = query({
         const style = variant ? await ctx.db.get(variant.styleId) : null;
         return {
           _id: item._id,
+          variantId: item.variantId as string,
           sku: variant?.sku ?? "",
           styleName: style?.name ?? "Unknown",
           size: variant?.size ?? "",
           color: variant?.color ?? "",
           quantity: item.quantity,
-          unitCostCentavos: item.unitCostCentavos,
-          lineTotalCentavos: item.lineTotalCentavos,
         };
       })
     );
+
+    // Fetch boxes for this transfer (if any)
+    const boxes = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_transfer", (q) => q.eq("transferId", invoice.transferId))
+      .collect();
+
+    let boxBreakdown: {
+      boxNumber: number;
+      boxCode: string;
+      status: string;
+      items: { sku: string; styleName: string; size: string; color: string; quantity: number }[];
+    }[] = [];
+
+    if (boxes.length > 0) {
+      boxBreakdown = await Promise.all(
+        boxes
+          .sort((a, b) => a.boxNumber - b.boxNumber)
+          .map(async (box) => {
+            const boxItems = await ctx.db
+              .query("transferBoxItems")
+              .withIndex("by_box", (q) => q.eq("boxId", box._id))
+              .collect();
+
+            const enrichedBoxItems = await Promise.all(
+              boxItems.map(async (bi) => {
+                const variant = await ctx.db.get(bi.variantId);
+                const style = variant ? await ctx.db.get(variant.styleId) : null;
+                return {
+                  sku: variant?.sku ?? "",
+                  styleName: style?.name ?? "Unknown",
+                  size: variant?.size ?? "",
+                  color: variant?.color ?? "",
+                  quantity: bi.quantity,
+                };
+              })
+            );
+
+            return {
+              boxNumber: box.boxNumber,
+              boxCode: box.boxCode,
+              status: box.status,
+              items: enrichedBoxItems,
+            };
+          })
+      );
+    }
 
     // Load business settings for print header
     const businessNameSetting = await ctx.db
@@ -118,9 +171,6 @@ export const getInternalInvoiceDetail = query({
         _id: invoice._id,
         invoiceNumber: invoice.invoiceNumber,
         transferId: invoice.transferId,
-        subtotalCentavos: invoice.subtotalCentavos,
-        vatAmountCentavos: invoice.vatAmountCentavos,
-        totalCentavos: invoice.totalCentavos,
         status: invoice.status,
         createdAt: invoice.createdAt,
       },
@@ -134,6 +184,8 @@ export const getInternalInvoiceDetail = query({
       },
       generatedByName: generatedBy?.name ?? "Unknown",
       items: enrichedItems,
+      boxes: boxBreakdown,
+      deliveryMode: boxes.length > 0 ? ("box" as const) : ("piece" as const),
       business: {
         name: (businessNameSetting?.value as string) ?? "RedBox Apparel",
         tin: (tinSetting?.value as string) ?? "",
@@ -143,7 +195,6 @@ export const getInternalInvoiceDetail = query({
 });
 
 // ── Branch-scoped: list invoices for the user's branch ───────────────────────
-// Warehouse users see invoices FROM their branch; retail users see invoices TO their branch.
 
 export const listBranchInvoices = query({
   args: {
@@ -159,10 +210,8 @@ export const listBranchInvoices = query({
     const isWarehouse = branch?.type === "warehouse";
     const limit = Math.min(Math.max(args.limit ?? 10, 1), 200);
 
-    // Warehouse → filter by fromBranchId; retail → filter by toBranchId
     let baseQuery;
     if (isWarehouse) {
-      // No index on fromBranchId — use by_createdAt + in-memory filter (same as dashboard)
       baseQuery = args.cursor !== undefined
         ? ctx.db.query("internalInvoices").withIndex("by_createdAt", (q) => q.lt("createdAt", args.cursor!))
         : ctx.db.query("internalInvoices").withIndex("by_createdAt");
@@ -177,7 +226,6 @@ export const listBranchInvoices = query({
 
     const allResults = await baseQuery.order("desc").collect();
 
-    // In-memory filter for warehouse (fromBranchId match)
     const filtered = isWarehouse
       ? allResults.filter((inv) => (inv.fromBranchId as string) === (branchId as string))
       : allResults;
@@ -186,7 +234,7 @@ export const listBranchInvoices = query({
     const hasMore = paged.length > limit;
     const invoices = hasMore ? paged.slice(0, limit) : paged;
 
-    // Enrich with branch names
+    // Enrich with branch names + item count
     const branchCache = new Map<string, string>();
     async function getBranchName(id: Id<"branches">) {
       const key = id as string;
@@ -198,16 +246,24 @@ export const listBranchInvoices = query({
     }
 
     const enriched = await Promise.all(
-      invoices.map(async (inv) => ({
-        _id: inv._id,
-        invoiceNumber: inv.invoiceNumber,
-        transferId: inv.transferId,
-        fromBranchName: await getBranchName(inv.fromBranchId),
-        toBranchName: await getBranchName(inv.toBranchId),
-        totalCentavos: inv.totalCentavos,
-        status: inv.status,
-        createdAt: inv.createdAt,
-      }))
+      invoices.map(async (inv) => {
+        const items = await ctx.db
+          .query("internalInvoiceItems")
+          .withIndex("by_invoice", (q) => q.eq("invoiceId", inv._id))
+          .collect();
+        const totalQty = items.reduce((sum, it) => sum + it.quantity, 0);
+
+        return {
+          _id: inv._id,
+          invoiceNumber: inv.invoiceNumber,
+          transferId: inv.transferId,
+          fromBranchName: await getBranchName(inv.fromBranchId),
+          toBranchName: await getBranchName(inv.toBranchId),
+          totalItems: totalQty,
+          status: inv.status,
+          createdAt: inv.createdAt,
+        };
+      })
     );
 
     const nextCursor = invoices.length > 0 ? invoices[invoices.length - 1].createdAt : undefined;
@@ -227,7 +283,6 @@ export const getBranchInvoiceDetail = query({
     const invoice = await ctx.db.get(args.invoiceId);
     if (!invoice) return null;
 
-    // Verify the invoice belongs to this branch (either as sender or receiver)
     if (
       (invoice.fromBranchId as string) !== (branchId as string) &&
       (invoice.toBranchId as string) !== (branchId as string)
@@ -250,25 +305,68 @@ export const getBranchInvoiceDetail = query({
         const style = variant ? await ctx.db.get(variant.styleId) : null;
         return {
           _id: item._id,
+          variantId: item.variantId as string,
           sku: variant?.sku ?? "",
           styleName: style?.name ?? "Unknown",
           size: variant?.size ?? "",
           color: variant?.color ?? "",
           quantity: item.quantity,
-          unitCostCentavos: item.unitCostCentavos,
-          lineTotalCentavos: item.lineTotalCentavos,
         };
       })
     );
+
+    // Fetch boxes
+    const boxes = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_transfer", (q) => q.eq("transferId", invoice.transferId))
+      .collect();
+
+    let boxBreakdown: {
+      boxNumber: number;
+      boxCode: string;
+      status: string;
+      items: { sku: string; styleName: string; size: string; color: string; quantity: number }[];
+    }[] = [];
+
+    if (boxes.length > 0) {
+      boxBreakdown = await Promise.all(
+        boxes
+          .sort((a, b) => a.boxNumber - b.boxNumber)
+          .map(async (box) => {
+            const boxItems = await ctx.db
+              .query("transferBoxItems")
+              .withIndex("by_box", (q) => q.eq("boxId", box._id))
+              .collect();
+
+            const enrichedBoxItems = await Promise.all(
+              boxItems.map(async (bi) => {
+                const variant = await ctx.db.get(bi.variantId);
+                const style = variant ? await ctx.db.get(variant.styleId) : null;
+                return {
+                  sku: variant?.sku ?? "",
+                  styleName: style?.name ?? "Unknown",
+                  size: variant?.size ?? "",
+                  color: variant?.color ?? "",
+                  quantity: bi.quantity,
+                };
+              })
+            );
+
+            return {
+              boxNumber: box.boxNumber,
+              boxCode: box.boxCode,
+              status: box.status,
+              items: enrichedBoxItems,
+            };
+          })
+      );
+    }
 
     return {
       invoice: {
         _id: invoice._id,
         invoiceNumber: invoice.invoiceNumber,
         transferId: invoice.transferId,
-        subtotalCentavos: invoice.subtotalCentavos,
-        vatAmountCentavos: invoice.vatAmountCentavos,
-        totalCentavos: invoice.totalCentavos,
         status: invoice.status,
         createdAt: invoice.createdAt,
       },
@@ -282,6 +380,8 @@ export const getBranchInvoiceDetail = query({
       },
       generatedByName: generatedBy?.name ?? "Unknown",
       items: enrichedItems,
+      boxes: boxBreakdown,
+      deliveryMode: boxes.length > 0 ? ("box" as const) : ("piece" as const),
     };
   },
 });

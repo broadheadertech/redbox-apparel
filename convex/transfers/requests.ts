@@ -5,6 +5,7 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { HQ_ROLES, BRANCH_MANAGEMENT_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { releaseHeldStock } from "../_helpers/transferStock";
+import { internal } from "../_generated/api";
 
 // L2 fix: build the combined role set without duplicating "admin"
 const TRANSFER_CREATE_ROLES: readonly string[] = Array.from(
@@ -37,7 +38,7 @@ export const createTransferRequest = mutation({
   args: {
     fromBranchId: v.id("branches"),
     toBranchId: v.id("branches"),
-    type: v.optional(v.union(v.literal("stockRequest"), v.literal("return"))),
+    type: v.optional(v.union(v.literal("stockRequest"), v.literal("return"), v.literal("interBranch"))),
     notes: v.optional(v.string()),
     // M3 fix: accept sku string — resolve to variantId inside handler
     items: v.array(
@@ -117,6 +118,20 @@ export const createTransferRequest = mutation({
           throw new ConvexError({
             code: "INVALID_ARGUMENT",
             message: "A reason is required for return requests.",
+          });
+        }
+      } else if (transferType === "interBranch") {
+        // Inter-branch: must be FROM user's own retail branch TO another retail branch
+        if (fromBranch.type === "warehouse" || toBranch.type === "warehouse") {
+          throw new ConvexError({
+            code: "INVALID_ARGUMENT",
+            message: "Inter-branch transfers must be between retail branches.",
+          });
+        }
+        if (scope.branchId && scope.branchId !== args.fromBranchId) {
+          throw new ConvexError({
+            code: "UNAUTHORIZED",
+            message: "You can only send from your own branch.",
           });
         }
       }
@@ -234,6 +249,11 @@ export const createTransferRequest = mutation({
       },
     });
 
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "transfer_requested",
+      transferId: newTransferId,
+    });
+
     return newTransferId;
   },
 });
@@ -338,6 +358,7 @@ export const listTransfers = query({
             fromBranch?.isActive ? fromBranch.name : "(inactive)",
           toBranchName:
             toBranch?.isActive ? toBranch.name : "(inactive)",
+          requestedById: transfer.requestedById,
           requestorName: requestor?.name ?? "Unknown",
           type: transfer.type ?? "stockRequest",
           status: transfer.status,
@@ -399,6 +420,11 @@ export const approveTransfer = mutation({
       before: { status: "requested" },
       after: { status: "approved" },
     });
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "transfer_approved",
+      transferId: args.transferId,
+    });
   },
 });
 
@@ -453,6 +479,12 @@ export const rejectTransfer = mutation({
       before: { status: "requested" },
       after: { status: "rejected", reason: args.reason.trim() },
     });
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "transfer_rejected",
+      transferId: args.transferId,
+      extra: { reason: args.reason.trim() },
+    });
   },
 });
 
@@ -504,6 +536,131 @@ export const cancelTransfer = mutation({
       entityId: args.transferId,
       before: { status: transfer.status },
       after: { status: "cancelled" },
+    });
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "transfer_cancelled",
+      transferId: args.transferId,
+    });
+  },
+});
+
+// ─── Inter-Branch: Acknowledge (receiving branch accepts) ────────────────────
+
+export const acknowledgeInterBranch = mutation({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    if (transfer.type !== "interBranch") {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "Only inter-branch transfers can be acknowledged.",
+      });
+    }
+    if (transfer.status !== "requested") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only pending transfers can be acknowledged.",
+      });
+    }
+
+    // Only the receiving branch manager or HQ can acknowledge
+    const isHQ = (HQ_ROLES as readonly string[]).includes(scope.user.role);
+    const isReceivingBranch = scope.branchId === transfer.toBranchId;
+    if (!isHQ && !isReceivingBranch) {
+      throw new ConvexError({
+        code: "UNAUTHORIZED",
+        message: "Only the receiving branch can acknowledge this transfer.",
+      });
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.transferId, {
+      status: "approved",  // reuse approved status — means "acknowledged, ready to pack"
+      approvedById: scope.userId,
+      approvedAt: now,
+      updatedAt: now,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "interBranch.acknowledge",
+      userId: scope.userId,
+      entityType: "transfers",
+      entityId: args.transferId,
+      before: { status: "requested" },
+      after: { status: "approved" },
+    });
+  },
+});
+
+// ─── Inter-Branch: Decline (receiving branch rejects) ────────────────────────
+
+export const declineInterBranch = mutation({
+  args: {
+    transferId: v.id("transfers"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+
+    if (!args.reason.trim()) {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "A reason is required when declining.",
+      });
+    }
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    if (transfer.type !== "interBranch") {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "Only inter-branch transfers can be declined.",
+      });
+    }
+    if (transfer.status !== "requested") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only pending transfers can be declined.",
+      });
+    }
+
+    // Only the receiving branch manager or HQ can decline
+    const isHQ = (HQ_ROLES as readonly string[]).includes(scope.user.role);
+    const isReceivingBranch = scope.branchId === transfer.toBranchId;
+    if (!isHQ && !isReceivingBranch) {
+      throw new ConvexError({
+        code: "UNAUTHORIZED",
+        message: "Only the receiving branch can decline this transfer.",
+      });
+    }
+
+    // Release held stock back to sender
+    await releaseHeldStock(ctx, args.transferId, transfer.fromBranchId);
+
+    const now = Date.now();
+    await ctx.db.patch(args.transferId, {
+      status: "rejected",
+      rejectedById: scope.userId,
+      rejectedAt: now,
+      rejectedReason: args.reason.trim(),
+      updatedAt: now,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "interBranch.decline",
+      userId: scope.userId,
+      entityType: "transfers",
+      entityId: args.transferId,
+      before: { status: "requested" },
+      after: { status: "rejected", reason: args.reason.trim() },
     });
   },
 });

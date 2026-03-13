@@ -35,6 +35,7 @@ import { enqueueTransaction, decrementStockItem } from "@/lib/offlineQueue";
 import type { DiscountType, PaymentMethod } from "@/lib/constants";
 import type { Id } from "@/convex/_generated/dataModel";
 import { ReceiptViewer } from "@/components/pos/ReceiptViewer";
+import { CrossSellStrip } from "@/components/pos/CrossSellStrip";
 import { usePromoPreview } from "@/lib/hooks/usePromoPreview";
 import type { PromoResult } from "@/convex/_helpers/promoCalculations";
 
@@ -800,7 +801,7 @@ type ActivePromo = {
   _id: Id<"promotions">;
   name: string;
   description?: string;
-  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered";
+  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
   priority: number;
 };
 
@@ -889,11 +890,16 @@ function CartContent({
             <p>Scan or search to add items</p>
           </div>
         ) : (
-          <CartItemList
-            items={items}
-            updateQuantity={updateQuantity}
-            removeItem={removeItem}
-          />
+          <>
+            <CartItemList
+              items={items}
+              updateQuantity={updateQuantity}
+              removeItem={removeItem}
+            />
+            {!showPayment && (
+              <CrossSellStrip variantIds={items.map((i) => i.variantId)} />
+            )}
+          </>
         )}
       </div>
 
@@ -978,12 +984,14 @@ function PaymentPanel({
 }) {
   const createTransaction = useMutation(api.pos.transactions.createTransaction);
   const currentUser = useQuery(api.auth.users.getCurrentUser);
+  const fashionAssistants = useQuery(api.pos.fashionAssistants.listActive);
   const connectionStatus = useConnectionStatus();
   const { clearCart } = usePOSCart();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [amountTendered, setAmountTendered] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedFaId, setSelectedFaId] = useState<string>("none");
 
   // Split payment state
   const [isSplit, setIsSplit] = useState(false);
@@ -1113,6 +1121,9 @@ function PaymentPanel({
           ? (selectedPromoId as Id<"promotions">)
           : undefined,
         splitPayment: splitPaymentArg,
+        fashionAssistantId: selectedFaId !== "none"
+          ? (selectedFaId as Id<"fashionAssistants">)
+          : undefined,
       });
 
       onComplete({
@@ -1362,6 +1373,28 @@ function PaymentPanel({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Fashion Assistant selector */}
+      {fashionAssistants && fashionAssistants.length > 0 && (
+        <div className="mb-4">
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            Fashion Assistant <span className="text-muted-foreground/60">(optional)</span>
+          </label>
+          <select
+            value={selectedFaId}
+            onChange={(e) => setSelectedFaId(e.target.value)}
+            disabled={isProcessing}
+            className="h-11 w-full rounded-md border bg-background px-3 text-sm"
+          >
+            <option value="none">— No fashion assistant —</option>
+            {fashionAssistants.map((fa) => (
+              <option key={String(fa._id)} value={String(fa._id)}>
+                {fa.name}{fa.employeeCode ? ` (${fa.employeeCode})` : ""}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 

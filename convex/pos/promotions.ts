@@ -68,6 +68,16 @@ export const getActivePromotions = query({
       priority: p.priority,
       agingTiers: p.agingTiers ?? [],
       branchClassifications: p.branchClassifications ?? [],
+      // crossSell reward scope
+      crossSellRewardType: p.crossSellRewardType,
+      rewardBrandIds: (p.rewardBrandIds ?? []).map(String),
+      rewardCategoryIds: (p.rewardCategoryIds ?? []).map(String),
+      rewardStyleIds: (p.rewardStyleIds ?? []).map(String),
+      rewardVariantIds: (p.rewardVariantIds ?? []).map(String),
+      // pwp fields
+      pwpTriggerMinQuantity: p.pwpTriggerMinQuantity,
+      pwpRewardVariantIds: (p.pwpRewardVariantIds ?? []).map(String),
+      pwpRewardPriceCentavos: p.pwpRewardPriceCentavos,
     }));
   },
 });
