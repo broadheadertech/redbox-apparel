@@ -12,6 +12,7 @@ import {
   Receipt,
   Trophy,
   Package,
+  Users,
 } from "lucide-react";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
@@ -75,7 +76,7 @@ function getPresetDates(
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Preset = "daily" | "yesterday" | "weekly" | "monthly" | "yearly" | "custom";
-type ReportTab = "branches" | "brands" | "invoices";
+type ReportTab = "branches" | "brands" | "invoices" | "cashiers";
 
 // ─── Main page component ──────────────────────────────────────────────────────
 
@@ -126,9 +127,16 @@ export default function HqReportsPage() {
   const avgTxnValueCentavos = totalTxnCount > 0 ? Math.round(totalRevenueCentavos / totalTxnCount) : 0;
   const topBranch = salesData?.[0];
 
+  const cashierReport = useQuery(api.admin.cashierReports.getCashierShiftReport, {
+    dateStart,
+    dateEnd,
+    ...(branchId ? { branchId: branchId as Id<"branches"> } : {}),
+  });
+
   const salesPagination = usePagination(salesData);
   const brandPagination = usePagination(filteredBrandData);
   const invoicePagination = usePagination(invoiceData?.byBranch);
+  const cashierPagination = usePagination(cashierReport);
 
   const presets: { key: "daily" | "yesterday" | "weekly" | "monthly" | "yearly"; label: string }[] = [
     { key: "daily", label: "Daily" },
@@ -317,6 +325,7 @@ export default function HqReportsPage() {
           { key: "branches" as const, label: "Branch Performance" },
           { key: "brands" as const, label: "Brand Breakdown" },
           { key: "invoices" as const, label: "Invoices" },
+          { key: "cashiers" as const, label: "Cashiers" },
         ]).map((tab) => (
           <button
             key={tab.key}
@@ -548,6 +557,124 @@ export default function HqReportsPage() {
               </p>
             </>
           )}
+      </div>
+      )}
+
+      {/* Cashier shift report */}
+      {activeTab === "cashiers" && (
+      <div className="rounded-lg border p-4">
+        <h2 className="mb-4 text-sm font-semibold flex items-center gap-2">
+          <Users className="h-4 w-4" />
+          Cashier Shift Report
+        </h2>
+        {cashierReport === undefined ? (
+          <div className="space-y-2">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-10 animate-pulse rounded bg-muted" />
+            ))}
+          </div>
+        ) : cashierReport.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No shifts found for the selected period.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="pb-2 font-medium">Cashier</th>
+                  <th className="pb-2 font-medium">Branch</th>
+                  <th className="pb-2 font-medium">Date</th>
+                  <th className="pb-2 font-medium">Open</th>
+                  <th className="pb-2 font-medium">Close</th>
+                  <th className="pb-2 text-right font-medium">Change Fund</th>
+                  <th className="pb-2 text-right font-medium">Cash</th>
+                  <th className="pb-2 text-right font-medium">GCash</th>
+                  <th className="pb-2 text-right font-medium">Maya</th>
+                  <th className="pb-2 text-right font-medium">Total</th>
+                  <th className="pb-2 text-right font-medium">Txns</th>
+                  <th className="pb-2 text-right font-medium">Voided</th>
+                  <th className="pb-2 font-medium">Type</th>
+                  <th className="pb-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cashierPagination.paginatedData.map((row) => {
+                  const openDate = new Date(row.openedAt);
+                  const closeDate = row.closedAt ? new Date(row.closedAt) : null;
+                  const fmt = (d: Date) =>
+                    d.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", hour12: true });
+                  const fmtDate = (d: Date) =>
+                    d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+                  return (
+                    <tr key={String(row.shiftId)} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="py-2 font-medium">{row.cashierName}</td>
+                      <td className="py-2 text-muted-foreground">{row.branchName}</td>
+                      <td className="py-2 text-muted-foreground">{fmtDate(openDate)}</td>
+                      <td className="py-2 tabular-nums">{fmt(openDate)}</td>
+                      <td className="py-2 tabular-nums">
+                        {closeDate ? fmt(closeDate) : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="py-2 text-right tabular-nums">
+                        {formatCentavos(row.changeFundCentavos)}
+                      </td>
+                      <td className="py-2 text-right tabular-nums">
+                        {formatCentavos(row.cashSalesCentavos)}
+                      </td>
+                      <td className="py-2 text-right tabular-nums">
+                        {formatCentavos(row.gcashSalesCentavos)}
+                      </td>
+                      <td className="py-2 text-right tabular-nums">
+                        {formatCentavos(row.mayaSalesCentavos)}
+                      </td>
+                      <td className="py-2 text-right tabular-nums font-semibold">
+                        {formatCentavos(row.totalSalesCentavos)}
+                      </td>
+                      <td className="py-2 text-right tabular-nums">{row.transactionCount}</td>
+                      <td className="py-2 text-right tabular-nums text-muted-foreground">
+                        {row.voidedCount > 0 ? row.voidedCount : "—"}
+                      </td>
+                      <td className="py-2">
+                        {row.closeType === "endOfDay" ? (
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                            End of Day
+                          </span>
+                        ) : row.closeType === "turnover" ? (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                            Turnover
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="py-2">
+                        {row.status === "open" ? (
+                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                            Open
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            Closed
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <TablePagination
+              currentPage={cashierPagination.currentPage}
+              totalPages={cashierPagination.totalPages}
+              totalItems={cashierPagination.totalItems}
+              hasNextPage={cashierPagination.hasNextPage}
+              hasPrevPage={cashierPagination.hasPrevPage}
+              onNextPage={cashierPagination.nextPage}
+              onPrevPage={cashierPagination.prevPage}
+              noun="shift"
+            />
+          </div>
+        )}
       </div>
       )}
 
