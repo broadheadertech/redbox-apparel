@@ -87,6 +87,8 @@ import type * as logistics_deliveries from "../logistics/deliveries.js";
 import type * as logistics_notificationRecords from "../logistics/notificationRecords.js";
 import type * as logistics_notifications from "../logistics/notifications.js";
 import type * as migrations_backfillBatches from "../migrations/backfillBatches.js";
+import type * as notifications_emailDigestHelpers from "../notifications/emailDigestHelpers.js";
+import type * as notifications_emailDigests from "../notifications/emailDigests.js";
 import type * as pos_crossSell from "../pos/crossSell.js";
 import type * as pos_fashionAssistants from "../pos/fashionAssistants.js";
 import type * as pos_offlineSync from "../pos/offlineSync.js";
@@ -104,6 +106,8 @@ import type * as reservations_notifications from "../reservations/notifications.
 import type * as reservations_reservations from "../reservations/reservations.js";
 import type * as seed from "../seed.js";
 import type * as seedReset from "../seedReset.js";
+import type * as snapshots_generate from "../snapshots/generate.js";
+import type * as snapshots_readers from "../snapshots/readers.js";
 import type * as storefront_addresses from "../storefront/addresses.js";
 import type * as storefront_bestsellers from "../storefront/bestsellers.js";
 import type * as storefront_branches from "../storefront/branches.js";
@@ -225,6 +229,8 @@ declare const fullApi: ApiFromModules<{
   "logistics/notificationRecords": typeof logistics_notificationRecords;
   "logistics/notifications": typeof logistics_notifications;
   "migrations/backfillBatches": typeof migrations_backfillBatches;
+  "notifications/emailDigestHelpers": typeof notifications_emailDigestHelpers;
+  "notifications/emailDigests": typeof notifications_emailDigests;
   "pos/crossSell": typeof pos_crossSell;
   "pos/fashionAssistants": typeof pos_fashionAssistants;
   "pos/offlineSync": typeof pos_offlineSync;
@@ -242,6 +248,8 @@ declare const fullApi: ApiFromModules<{
   "reservations/reservations": typeof reservations_reservations;
   seed: typeof seed;
   seedReset: typeof seedReset;
+  "snapshots/generate": typeof snapshots_generate;
+  "snapshots/readers": typeof snapshots_readers;
   "storefront/addresses": typeof storefront_addresses;
   "storefront/bestsellers": typeof storefront_bestsellers;
   "storefront/branches": typeof storefront_branches;

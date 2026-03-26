@@ -125,8 +125,10 @@ export default function BranchLayout({
 }) {
   const currentUser = useQuery(api.auth.users.getCurrentUser);
   const siteAssets = useQuery(api.admin.settings.getSiteAssets);
+  const branchContext = useQuery(api.dashboards.branchDashboard.getBranchContext);
   const router = useRouter();
   const pathname = usePathname();
+  const isWarehouse = branchContext?.branchType === "warehouse";
 
   useEffect(() => {
     if (
@@ -177,8 +179,12 @@ export default function BranchLayout({
           <Separator />
           <nav className="p-2 space-y-1">
             <NavSection items={overviewNavItems} pathname={pathname} label="Overview" />
-            <Separator className="my-2" />
-            <NavSection items={operationsNavItems} pathname={pathname} label="Operations" />
+            {!isWarehouse && (
+              <>
+                <Separator className="my-2" />
+                <NavSection items={operationsNavItems} pathname={pathname} label="Operations" />
+              </>
+            )}
             <Separator className="my-2" />
             <NavSection items={insightsNavItems} pathname={pathname} label="Insights" />
             <Separator className="my-2" />
