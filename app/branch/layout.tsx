@@ -32,7 +32,7 @@ import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
 
-const ALLOWED_ROLES = ["admin", "manager", "viewer"];
+const ALLOWED_ROLES = ["admin", "manager", "viewer", "warehouseStaff"];
 
 type NavItem = {
   href: string;
@@ -128,7 +128,9 @@ export default function BranchLayout({
   const branchContext = useQuery(api.dashboards.branchDashboard.getBranchContext);
   const router = useRouter();
   const pathname = usePathname();
-  const isWarehouse = branchContext?.branchType === "warehouse";
+  const isWarehouse =
+    branchContext?.branchType === "warehouse" ||
+    currentUser?.role === "warehouseStaff";
 
   useEffect(() => {
     if (
